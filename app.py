@@ -1,15 +1,23 @@
+from queue import PriorityQueue
 from time import time
-from typing import Tuple, Dict, List
+from typing import Tuple, List
 
+import tkinter
+import random
 import matplotlib.pyplot as plt
+import matplotlib
 import numpy as np
 import geopandas as gp
 from geopandas import GeoDataFrame
 from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.widgets import Slider
 from shapely.geometry import Polygon, Point
 
 plt.rcParams.update({'figure.dpi': 350})
+matplotlib.use("TkAgg")
 
 
 class GridVertex:
@@ -100,10 +108,10 @@ class PolygonIntensityPair:
 
 
 class CrimeMap:
-    def __init__(self, shape_file: str, grid_delta: float, threshold_percent: int):
+    def __init__(self, shape_file: str, grid_delta: float, threshold_percent: float):
         self._shape_file: str = shape_file
         self._delta: float = grid_delta
-        self._threshold_percent: int = threshold_percent
+        self._threshold_percent: float = threshold_percent
         self._geo_data_frame: GeoDataFrame = gp.read_file(shape_file)
         bounds = self._geo_data_frame.total_bounds
         self._x_min: int = bounds[0]
@@ -135,6 +143,8 @@ class CrimeMap:
         self._inflection_index: int = computed_statistics['inflection_index']
         self._colors: List[str] = computed_statistics['colors']
         self._sorted_norm_values: List[int] = computed_statistics['sorted_norm_values']
+
+        self._n_high: int = computed_statistics['n_high']
         self._v_min: int = computed_statistics['v_min']
         self._v_max: int = computed_statistics['v_max']
         self._v_median: float = computed_statistics['median']
@@ -148,7 +158,7 @@ class CrimeMap:
         self._ys.append(self._y_max)
 
         self._grid: List[Tuple[float, float]] = self._make_grid()
-
+        self._grid_x_dim: int = len(self._xs)
 
     def plot_crime_points(self):
         self._geo_data_frame.plot()
@@ -192,24 +202,226 @@ class CrimeMap:
         ys: List[float] = list(self._y_range.copy())
         ys.append(self._y_max)
 
-        grid = []
-        for y in ys:
-            for x in xs:
-                grid.append((x, y))
+        grid = [(x, y) for y in ys for x in xs]
 
         return grid
 
     def _closest_point(self, point: Tuple[float, float]) -> Tuple[float, float]:
-        (x, y) = point
-        x_index = int(np.floor(max(x - self._x_min, 0) / self._delta))
-        y_index = int(np.floor(max(y - self._y_min, 0) / self._delta))
-        return self._xs[x_index], self._ys[y_index]
+        xi, yi = self._closest_indices(point)
+        return self._xs[xi], self._ys[yi]
 
-    def travel(self, initial: Tuple[float, float], goal: Tuple[float, float]):
-        pi = self._closest_point(initial)
-        pf = self._closest_point(goal)
-        ndim: int = len(self._grid)
-        grid: np.ndarray = np.reshape(self._grid, (ndim, ndim))
+    def _closest_indices(self, point: Tuple[float, float]):
+        (x, y) = point
+        x_index = min(int(np.round(max(x - self._x_min, 0) / self._delta)), len(self._x_range))
+        y_index = min(int(np.round(max(y - self._y_min, 0) / self._delta)), len(self._x_range))
+        return x_index, y_index
+
+    def travel(self, ax: Axes, initial: Tuple[float, float], final: Tuple[float, float]):
+        delta = self._delta
+        grid = self._grid
+        goal = self._closest_point(final)
+        xf, yf = self._closest_indices(goal)
+        xi, yi = self._closest_indices(initial)
+        n = self._grid_x_dim
+        pq = PriorityQueue()
+        is_goal_reached: bool = False
+        came_from_set = []
+
+        def i1d2(p_index):
+            (x_index, y_index) = p_index
+            return y_index * int(np.sqrt(len(self._polygon_intensities))) + x_index
+
+        def i1d(x_index, y_index):
+            return y_index * n + x_index
+
+        def g(p_index: Tuple[int, int], neighbour_index: Tuple[int, int]) -> float:
+            (x_index, y_index) = p_index
+            (x_index_neighbour, y_index_neighbour) = neighbour_index
+            return 0.0
+
+        def h(x_index, y_index) -> float:
+            (px, py) = grid[i1d(x_index, y_index)]
+            (gx, gy) = goal
+            return (((gx - px) ** 2) + ((gy - py) ** 2)) ** 0.5
+
+        def get_cost(p_index: Tuple[int, int], neighbour_index: Tuple[int, int]) -> float:
+            (x_index, y_index) = p_index
+            return g(p_index, neighbour_index) + h(x_index, y_index)
+
+        def is_in_range2(p_index) -> bool:
+            (x_index, y_index) = p_index
+            return is_in_range(x_index, y_index)
+
+        def is_in_range(x_index, y_index) -> bool:
+            return 0 <= x_index < n and 0 <= y_index < n
+
+        def get_neighbours(x_index, y_index):
+            indices = [
+                (x_index, y_index + 1),      # up
+                (x_index + 1, y_index + 1),  # up-right
+                (x_index + 1, y_index),      # right
+                (x_index + 1, y_index - 1),  # down-right
+                (x_index, y_index - 1),      # down
+                (x_index - 1, y_index - 1),  # down-left
+                (x_index - 1, y_index),      # left
+                (x_index - 1, y_index + 1)   # up-left
+            ]
+
+            polygon_indices = [
+                (x_index, y_index),          # up-right
+                (x_index, y_index - 1),      # down-right
+                (x_index - 1, y_index - 1),  # down-left
+                (x_index - 1, y_index)       # up-left
+            ]
+
+            def get_cost_non_diagonal(is_block_1, is_block_2):
+                if is_block_1 and is_block_2:
+                    return None
+                if is_block_1:
+                    return 1.3
+                return 1.0
+
+            cost_index_pairs = []
+
+            def is_polygon_in_range(polygon_index):
+                x_polygon_index, y_polygon_index = polygon_index
+                n_polygon = int(np.sqrt(len(self._polygon_intensities)))
+                return 0 <= x_polygon_index < n_polygon and 0 <= y_polygon_index < n_polygon
+
+            if is_in_range2(indices[0]) and is_polygon_in_range(polygon_indices[0]) and is_polygon_in_range(polygon_indices[3]):
+                is_block_right = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
+                is_block_left = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
+                cost_non_diagonal = get_cost_non_diagonal(is_block_right, is_block_left)
+                if cost_non_diagonal is not None:
+                    cost_index_pairs.append((cost_non_diagonal, indices[0]))
+
+            if is_in_range2(indices[1]) and is_polygon_in_range(polygon_indices[0]):
+                is_block = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
+                if not is_block:
+                    cost_index_pairs.append((1.5, indices[1]))
+
+            if is_in_range2(indices[2]) and is_polygon_in_range(polygon_indices[0]) and is_polygon_in_range(polygon_indices[1]):
+                is_block_up = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
+                is_block_down = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
+                cost_non_diagonal = get_cost_non_diagonal(is_block_up, is_block_down)
+                if cost_non_diagonal is not None:
+                    cost_index_pairs.append((cost_non_diagonal, indices[2]))
+
+            if is_in_range2(indices[3]) and is_polygon_in_range(polygon_indices[1]):
+                is_block = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
+                if not is_block:
+                    cost_index_pairs.append((1.5, indices[3]))
+
+            if is_in_range2(indices[4]) and is_polygon_in_range(polygon_indices[1]) and is_polygon_in_range(polygon_indices[2]):
+                is_block_right = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
+                is_block_left = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
+                cost_non_diagonal = get_cost_non_diagonal(is_block_right, is_block_left)
+                if cost_non_diagonal is not None:
+                    cost_index_pairs.append((cost_non_diagonal, indices[4]))
+
+            if is_in_range2(indices[5]) and is_polygon_in_range(polygon_indices[2]):
+                is_block = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
+                if not is_block:
+                    cost_index_pairs.append((1.5, indices[5]))
+
+            if is_in_range2(indices[6]) and is_polygon_in_range(polygon_indices[3]) and is_polygon_in_range(polygon_indices[2]):
+                is_block_up = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
+                is_block_down = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
+                cost_non_diagonal = get_cost_non_diagonal(is_block_up, is_block_down)
+                if cost_non_diagonal is not None:
+                    cost_index_pairs.append((cost_non_diagonal, indices[6]))
+
+            if is_in_range2(indices[7]) and is_polygon_in_range(polygon_indices[3]):
+                is_block = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
+                if not is_block:
+                    cost_index_pairs.append((1.5, indices[7]))
+
+            #filtered_indices = [(x_i, y_i) for x_i, y_i in indices if is_in_range(x_i, y_i)]
+
+            return cost_index_pairs
+
+        def draw_markers():
+            ax.plot([xi], [yi], color='black')
+            plt.draw()  # re-draw the figure
+            plt.pause(0.000000000001)
+            ax.plot([xf], [yf], color='black')
+            plt.draw()  # re-draw the figure
+            plt.pause(0.000000000001)
+
+        def draw_lines(point: Tuple[int, int], points: List[Tuple[int, int]], color=None):
+            xs = self._xs
+            ys = self._ys
+            (xi1, yi1) = point
+
+            lines = [([xs[xi1], xs[xi2]], [ys[yi1], ys[yi2]]) for xi2, yi2 in points]
+
+            for line in lines:
+                x_values, y_values = line
+                ax.plot(x_values, y_values, color=color if color is not None else 'white')
+                # fig: Figure = ax.get_figure()
+                # plt.draw()  # re-draw the figure
+                # plt.pause(0.000000000001)
+
+        # draw_markers()
+        pq.put((100000000.0, (xi, yi)))
+
+        closed_set = []
+
+        while not pq.empty():
+            cost, pi = pq.get()
+            (xi, yi) = pi
+            closed_set.append(pi)
+
+            # if pi == (8, 12):
+            #     print('here!')
+
+            if pi == (xf, yf):
+                is_goal_reached = True
+                break
+
+            cips = get_neighbours(xi, yi)
+            pis = [pi for (c, pi) in cips]
+            draw_lines((xi, yi), pis)
+
+            for (g_cost_neighbour, neighbour) in cips:
+                (x_neighbour, y_neighbour) = neighbour
+                # if neighbour == (8, 12):
+                #     print('here!')
+                cost_neighbour = g_cost_neighbour + 1000000*h(x_neighbour, y_neighbour)
+                if cost_neighbour < cost and (x_neighbour, y_neighbour) not in closed_set:
+                    # if pi in came_from_set:
+                    #     came_from_index = came_from_set.index(pi)
+                    #     came_from_set = came_from_set[:came_from_index]
+                    # print('goal: ' + str((xf, yf)) + '; adding: ' + str((x_neighbour, y_neighbour)))
+
+                    came_from_set.append(pi)
+
+                    if pi not in [p for (c, p) in pq.queue]:
+                        pq.put((cost_neighbour, neighbour))
+                    # pq.put((cost_neighbour, neighbour))
+
+        print('is_goal_reached: ' + str(is_goal_reached))
+
+        if is_goal_reached:
+            path = []
+            came_from_set_reversed = list(reversed(came_from_set))
+            (p_current_x, p_current_y) = came_from_set_reversed[0]
+
+            for i in np.arange(1, len(came_from_set), 1):
+                (p_next_x, p_next_y) = came_from_set_reversed[i]
+                dx = abs(p_current_x - p_next_x)
+                dy = abs(p_current_y - p_next_y)
+                if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
+                    continue
+                else:
+                    path.append((p_current_x, p_current_y))
+                    p_current_x = p_next_x
+                    p_current_y = p_next_y
+
+            path_reversed = path[::-1]
+            for i in np.arange(1, len(path_reversed), 1):
+                draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
+
         pass
 
     def compute_statistics(self):
@@ -233,9 +445,9 @@ class CrimeMap:
             coord_intensities.append(CoordIntensityPair(vertex))
 
         for point in points:
-            x_index = int(np.floor((point.x - x_min) / delta))
-            y_index = int(np.floor((point.y - y_min) / delta))
-            coord_intensities[y_index * len(self._y_range) + x_index].intensity += 1
+            x_index = min(int(np.floor((point.x - x_min) / delta)), len(self._x_range) - 1)
+            y_index = min(int(np.floor((point.y - y_min) / delta)), len(self._y_range) - 1)
+            coord_intensities[min(y_index * len(self._y_range) + x_index, len(vertices) - 1)].intensity += 1
 
         values = [ci.intensity for ci in coord_intensities]
         polygons = self._polygons
@@ -296,6 +508,7 @@ class CrimeMap:
             colors=colors,
             sorted_norm_values=norm_values,
 
+            n_high=len(yellow_colors),
             v_min=v_min,
             v_max=v_max,
             median=median,
@@ -305,12 +518,12 @@ class CrimeMap:
             plot_data_time=plot_data_time
         )
 
-    def plot(self):
+    def plot(self) -> Axes:
         gdf = gp.GeoDataFrame({'values': self._sorted_norm_values, 'colors': self._colors},
                               geometry=self._sorted_polygons)
-        ax: Axes = gdf.plot(column='values', cmap='viridis')
 
-        # fig: Figure = ax.get_figure()
+        ax: Axes = gdf.plot(column='values', cmap='viridis') if self._threshold_percent != 0 else gdf.plot(
+            color='yellow')
 
         for i in np.arange(0, len(self._sorted_centroids), 1):
             centroid = self._sorted_centroids[i].xy
@@ -318,7 +531,7 @@ class CrimeMap:
             y = centroid[1][0]
             val = self._sorted_values[i]
             color = 'white' if self._colors[i] == 'purple' else 'black'
-            plt.text(x, y, str(val), fontdict=dict(color=color, fontsize=5, ha='center', va='center'))
+            plt.text(x, y, str(val), fontdict=dict(color=color, fontsize=3, ha='center', va='center'))
 
         xs = list(self._x_range)
         xs.append(self._x_max)
@@ -329,26 +542,92 @@ class CrimeMap:
         y_ticks = [y for (y, i) in zip(ys, np.arange(0, len(ys), 1)) if i % 2 == 0]
 
         ax.set_xticks(x_ticks)
-        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=6))
+        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=4))
         ax.set_yticks(y_ticks)
-        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=6))
+        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=4))
         ax.set_title(
-            'std_dev = {std_dev}, avg = {avg}'.format(std_dev='{:.2f}'.format(self._v_std_dev),
-                                                      avg='{:.2f}'.format(self._v_avg)),
+            'n_high={n_high}, std_dev={std_dev}, avg={avg}, delta={delta}, threshold={threshold}%'.format(
+                std_dev='{:.2f}'.format(self._v_std_dev),
+                avg='{:.2f}'.format(self._v_avg),
+                delta='{:.3f}'.format(self._delta),
+                threshold=str(self._threshold_percent),
+                n_high=self._n_high
+            ),
             pad=10,
             fontdict=dict(fontsize=8))
-        plt.show()
+
+        plt.draw()
         # self._geo_data_frame.plot(ax=ax)
+
+        return ax
+
+        # root = tkinter.Tk()
+        # fig = plt.Figure()
+        # canvas = FigureCanvasTkAgg(fig, root)
+        # canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
+        # ax_gui: Axes = fig.add_subplot(111)
+        #
+        # fig.subplots_adjust(bottom=0.25)
+        # y_values = [random.randrange(20, 40, 1) for _ in range(40)]
+        # x_values = [i for i in range(40)]
+        #
+        # # ax.axis([0, 9, 20, 40])
+        # # ax.plot(x_values, y_values)
+        # gdf.plot(column='values', cmap='viridis', ax=ax_gui) if self._threshold_percent != 0 else gdf.plot(
+        #     color='yellow', ax=ax_gui)
+        #
+        # for i in np.arange(0, len(self._sorted_centroids), 1):
+        #     centroid = self._sorted_centroids[i].xy
+        #     x = centroid[0][0]
+        #     y = centroid[1][0]
+        #     val = self._sorted_values[i]
+        #     color = 'white' if self._colors[i] == 'purple' else 'black'
+        #
+        #     ax_gui.text(x, y, str(val), fontdict=dict(color=color, fontsize=3, ha='center', va='center'))
+        #
+        # ax_threshold = fig.add_axes([(0.25+0.25/2), 0.1, 0.25, 0.03])
+        # s_threshold = Slider(ax_threshold, 'Threshold (%)', 0, 100, valinit=50, valstep=1)
+        #
+        # def update(threshold):
+        #     ax_gui.set_title('std_dev = {std_dev}, avg = {avg} ({aperture}, {threshold}%)'.format(
+        #         std_dev='{:.2f}'.format(self._v_std_dev),
+        #         avg='{:.2f}'.format(self._v_avg), aperture='{:.3f}'.format(self._delta),
+        #         threshold='{:.2f}'.format(threshold)))
+        #     fig.canvas.draw_idle()
+        #
+        # s_threshold.on_changed(update)
+        #
+        # tkinter.mainloop()
 
 
 def main():
+    plt.ion()
     start_time = time()
-    crime_map = CrimeMap('./Shape/crime_dt.shp', 0.002, 50)
-    crime_map.plot()
-    # crime_map.travel(start=(1,1), goal=(2,2))
+    crime_map = CrimeMap('./Shape/crime_dt.shp', 0.002, 65)
+    ax = crime_map.plot()
+    # crime_map.travel(ax=ax, initial=(-73.586, 45.510), final=(-73.552, 45.494))
+    # crime_map.travel(ax=ax, initial=(-73.566, 45.528), final=(-73.552, 45.494))
+    # crime_map.travel(ax=ax, initial=(-73.588, 45.494), final=(-73.554, 45.526))
+    crime_map.travel(ax=ax, initial=(-73.588, 45.494), final=(-73.555, 45.514))
     end_time = time()
     exec_time = end_time - start_time
     print('exec_time: ' + str(exec_time))
+
+    # x = np.linspace(0, 6 * np.pi, 100)
+    # y = np.sin(x)
+    #
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # line1, = ax.plot(x, y, 'r-')
+    # plt.draw()
+    #
+    # for phase in np.linspace(0, 10 * np.pi, 500):
+    #     line1.set_ydata(np.sin(x + phase))
+    #     plt.draw()
+    #     plt.pause(0.02)
+    #
+    plt.ioff()
+    plt.show()
 
 
 if __name__ == '__main__':
