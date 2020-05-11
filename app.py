@@ -9,6 +9,7 @@ import matplotlib
 import numpy as np
 import geopandas as gp
 from geopandas import GeoDataFrame
+from matplotlib import animation
 from matplotlib.axes import Axes
 # from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -226,6 +227,8 @@ class CrimeMap:
         pq = PriorityQueue()
         is_goal_reached: bool = False
         came_from_set = []
+        came_from_cost_point_set = []
+        cameFrom = {}
 
         def i1d2(p_index):
             (x_index, y_index) = p_index
@@ -336,8 +339,6 @@ class CrimeMap:
                 if not is_block:
                     cost_index_pairs.append((1.5, indices[7]))
 
-            #filtered_indices = [(x_i, y_i) for x_i, y_i in indices if is_in_range(x_i, y_i)]
-
             return cost_index_pairs
 
         def draw_markers():
@@ -367,17 +368,22 @@ class CrimeMap:
 
         closed_set = []
 
+        path = []
+
         while not pq.empty():
             cost, pi = pq.get()
             (xi, yi) = pi
-            closed_set.append(pi)
-
-            # if pi == (8, 12):
-            #     print('here!')
 
             if pi == (xf, yf):
                 is_goal_reached = True
+                path = [pi]
+                while pi in cameFrom:
+                    pi = cameFrom[pi]
+                    path.append(pi)
+                path.reverse()
                 break
+
+            closed_set.append(pi)
 
             cips = get_neighbours(xi, yi)
             pis = [pi for (c, pi) in cips]
@@ -385,42 +391,127 @@ class CrimeMap:
 
             for (g_cost_neighbour, neighbour) in cips:
                 (x_neighbour, y_neighbour) = neighbour
-                # if neighbour == (8, 12):
-                #     print('here!')
-                cost_neighbour = g_cost_neighbour + 1000000*h(x_neighbour, y_neighbour)
-                if cost_neighbour < cost and (x_neighbour, y_neighbour) not in closed_set:
-                    # if pi in came_from_set:
-                    #     came_from_index = came_from_set.index(pi)
-                    #     came_from_set = came_from_set[:came_from_index]
-                    # print('goal: ' + str((xf, yf)) + '; adding: ' + str((x_neighbour, y_neighbour)))
+                cost_neighbour = g_cost_neighbour + 0* h(x_neighbour, y_neighbour)
 
+                if cost_neighbour < cost and pi not in came_from_set:
                     came_from_set.append(pi)
+                    came_from_cost_point_set.append((cost, pi))
 
-                    if pi not in [p for (c, p) in pq.queue]:
-                        pq.put((cost_neighbour, neighbour))
-                    # pq.put((cost_neighbour, neighbour))
+                if cost_neighbour < cost:
+                    cameFrom[neighbour] = pi
+
+                # if neighbour not in closed_set \
+                #         and neighbour not in [p for (c, p) in pq.queue] \
+                #         and cost_neighbour < cost:
+                #     cameFrom[neighbour] = pi
+
+                if neighbour not in closed_set and neighbour not in [p for (c, p) in pq.queue]:
+                    pq.put((cost_neighbour, neighbour))
+                    # pq.put((cost + cost_neighbour, neighbour))
+                    # if cost_neighbour < cost and pi not in came_from_set:
+                    #     came_from_set.append(pi)
+                    #     came_from_cost_point_set.append((cost, pi))
+                elif neighbour in [p for (c, p) in pq.queue]:
+                    queue = [p for (c, p) in pq.queue]
+                    same_neighbour_index = queue.index(neighbour)
+                    (same_neighbour_cost, same_neighbour) = pq.queue[same_neighbour_index]
+                    # if cost_neighbour < cost and pi not in came_from_set:
+                    #     came_from_set.append(pi)
+                    #     came_from_cost_point_set.append((cost, pi))
+
+                    if same_neighbour_cost > cost_neighbour:
+                    # if same_neighbour_cost > cost + cost_neighbour:
+                        if same_neighbour in came_from_set:
+                            print('here')
+
+                        new_pq = PriorityQueue()
+                        for (c, p) in pq.queue:
+                            if not p == neighbour:
+                                new_pq.put((c, p))
+                        new_pq.put((cost_neighbour, neighbour))
+                        # new_pq.put((cost + cost_neighbour, neighbour))
+                        pq = new_pq
 
         print('is_goal_reached: ' + str(is_goal_reached))
 
         if is_goal_reached:
-            path = []
-            came_from_set_reversed = list(reversed(came_from_set))
-            (p_current_x, p_current_y) = came_from_set_reversed[0]
+            for i in np.arange(1, len(path), 1):
+                draw_lines(path[i - 1], [path[i]], color='black')
 
+        if is_goal_reached:
             for i in np.arange(1, len(came_from_set), 1):
-                (p_next_x, p_next_y) = came_from_set_reversed[i]
-                dx = abs(p_current_x - p_next_x)
-                dy = abs(p_current_y - p_next_y)
-                if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
-                    continue
-                else:
-                    path.append((p_current_x, p_current_y))
-                    p_current_x = p_next_x
-                    p_current_y = p_next_y
+                draw_lines(came_from_set[i - 1], [came_from_set[i]], color='black')
 
-            path_reversed = path[::-1]
-            for i in np.arange(1, len(path_reversed), 1):
-                draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
+        # if is_goal_reached:
+        #     path = []
+        #     came_from_cost_point_set_reversed = came_from_cost_point_set[::-1]
+        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set_reversed[0]
+        #     for i in np.arange(1, len(came_from_cost_point_set_reversed), 1):
+        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set_reversed[i]
+        #         if p_next_cost > p_current_cost:
+        #             path.append((p_current_x, p_current_y))
+        #             p_current_x = p_next_x
+        #             p_current_y = p_next_y
+        #     path_reversed = path[::-1]
+        #     for i in np.arange(1, len(path_reversed), 1):
+        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
+
+        # if is_goal_reached:
+        #     path = []
+        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set[0]
+        #     for i in np.arange(1, len(came_from_cost_point_set), 1):
+        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set[i]
+        #         if p_next_cost < p_current_cost and (p_next_x, p_next_y) not in path:
+        #             path.append((p_current_x, p_current_y))
+        #             p_current_x = p_next_x
+        #             p_current_y = p_next_y
+        #     for i in np.arange(1, len(path), 1):
+        #         draw_lines(path[i - 1], [path[i]], color='black')
+
+        # if is_goal_reached:
+        #     path = []
+        #     came_from_set_reversed = list(reversed(came_from_set))
+        #     (p_current_x, p_current_y) = came_from_set_reversed[0]
+        #
+        #     for i in np.arange(1, len(came_from_set), 1):
+        #         (p_next_x, p_next_y) = came_from_set_reversed[i]
+        #         dx = abs(p_current_x - p_next_x)
+        #         dy = abs(p_current_y - p_next_y)
+        #         if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
+        #             continue
+        #         else:
+        #             path.append((p_current_x, p_current_y))
+        #             p_current_x = p_next_x
+        #             p_current_y = p_next_y
+        #
+        #     path_reversed = path[::-1]
+        #     for i in np.arange(1, len(path_reversed), 1):
+        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
+
+        # if is_goal_reached:
+        #     path = []
+        #     path_costs = []
+        #     came_from_cost_point_set_reversed = came_from_cost_point_set[::-1]
+        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set_reversed[0]
+        #
+        #     for i in np.arange(1, len(came_from_cost_point_set_reversed), 1):
+        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set_reversed[i]
+        #         dx = abs(p_current_x - p_next_x)
+        #         dy = abs(p_current_y - p_next_y)
+        #         # if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
+        #         #     #continue
+        #         #     pass
+        #         if p_next_cost > p_current_cost:
+        #             path.append((p_current_x, p_current_y))
+        #             path_costs.append((p_current_cost, (p_current_x, p_current_y)))
+        #             p_current_x = p_next_x
+        #             p_current_y = p_next_y
+        #             p_current_cost = p_next_cost
+        #
+        #     path_reversed = path[::-1]
+        #     path_costs_reversed = path_costs[::-1]
+        #     for i in np.arange(1, len(path_reversed), 1):
+        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
 
         pass
 
@@ -613,19 +704,6 @@ def main():
     exec_time = end_time - start_time
     print('exec_time: ' + str(exec_time))
 
-    # x = np.linspace(0, 6 * np.pi, 100)
-    # y = np.sin(x)
-    #
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # line1, = ax.plot(x, y, 'r-')
-    # plt.draw()
-    #
-    # for phase in np.linspace(0, 10 * np.pi, 500):
-    #     line1.set_ydata(np.sin(x + phase))
-    #     plt.draw()
-    #     plt.pause(0.02)
-    #
     plt.ioff()
     plt.show()
 
