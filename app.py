@@ -2,53 +2,16 @@ from queue import PriorityQueue
 from time import time
 from typing import Tuple, List
 
-import tkinter
-import random
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import geopandas as gp
 from geopandas import GeoDataFrame
-from matplotlib import animation
 from matplotlib.axes import Axes
-# from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-from matplotlib.widgets import Slider
 from shapely.geometry import Polygon, Point
 
 plt.rcParams.update({'figure.dpi': 350})
 matplotlib.use("TkAgg")
-
-
-class GridVertex:
-    def __init__(self, x: float, y: float):
-        self.x = x
-        self.y = y
-
-
-class GridCell:
-    def __init__(self, polygon: Polygon, is_block: bool):
-        self.polygon = polygon
-        self.is_block = is_block
-        bounds = polygon.bounds
-        x_min = bounds[0]
-        y_min = bounds[1]
-        x_max = bounds[2]
-        y_max = bounds[3]
-        self.vertices = dict(ul=(x_min, y_max), ur=(x_max, y_max), ll=(x_min, y_min), lr=(x_max, y_min))
-
-        self.up = None
-
-
-class Grid:
-    def __init__(self, xs: List[Tuple[float, float]], ys: List[Tuple[float, float]]):
-        self._xs = xs
-        self._ys = ys
-        self._n_dims: Tuple[int, int] = (len(xs), len(ys))
-        self._grid: np.ndarray = np.array([(x, y) for y in ys for x in xs])
-
-    # def closest_position(self, position: Tuple[float, float]) -> Tuple[float, float]:
 
 
 class CoordIntensityPair:
@@ -391,7 +354,7 @@ class CrimeMap:
 
             for (g_cost_neighbour, neighbour) in cips:
                 (x_neighbour, y_neighbour) = neighbour
-                cost_neighbour = g_cost_neighbour + 0* h(x_neighbour, y_neighbour)
+                cost_neighbour = g_cost_neighbour + 0 * h(x_neighbour, y_neighbour)
 
                 if cost_neighbour < cost and pi not in came_from_set:
                     came_from_set.append(pi)
@@ -441,77 +404,6 @@ class CrimeMap:
         if is_goal_reached:
             for i in np.arange(1, len(came_from_set), 1):
                 draw_lines(came_from_set[i - 1], [came_from_set[i]], color='black')
-
-        # if is_goal_reached:
-        #     path = []
-        #     came_from_cost_point_set_reversed = came_from_cost_point_set[::-1]
-        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set_reversed[0]
-        #     for i in np.arange(1, len(came_from_cost_point_set_reversed), 1):
-        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set_reversed[i]
-        #         if p_next_cost > p_current_cost:
-        #             path.append((p_current_x, p_current_y))
-        #             p_current_x = p_next_x
-        #             p_current_y = p_next_y
-        #     path_reversed = path[::-1]
-        #     for i in np.arange(1, len(path_reversed), 1):
-        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
-
-        # if is_goal_reached:
-        #     path = []
-        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set[0]
-        #     for i in np.arange(1, len(came_from_cost_point_set), 1):
-        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set[i]
-        #         if p_next_cost < p_current_cost and (p_next_x, p_next_y) not in path:
-        #             path.append((p_current_x, p_current_y))
-        #             p_current_x = p_next_x
-        #             p_current_y = p_next_y
-        #     for i in np.arange(1, len(path), 1):
-        #         draw_lines(path[i - 1], [path[i]], color='black')
-
-        # if is_goal_reached:
-        #     path = []
-        #     came_from_set_reversed = list(reversed(came_from_set))
-        #     (p_current_x, p_current_y) = came_from_set_reversed[0]
-        #
-        #     for i in np.arange(1, len(came_from_set), 1):
-        #         (p_next_x, p_next_y) = came_from_set_reversed[i]
-        #         dx = abs(p_current_x - p_next_x)
-        #         dy = abs(p_current_y - p_next_y)
-        #         if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
-        #             continue
-        #         else:
-        #             path.append((p_current_x, p_current_y))
-        #             p_current_x = p_next_x
-        #             p_current_y = p_next_y
-        #
-        #     path_reversed = path[::-1]
-        #     for i in np.arange(1, len(path_reversed), 1):
-        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
-
-        # if is_goal_reached:
-        #     path = []
-        #     path_costs = []
-        #     came_from_cost_point_set_reversed = came_from_cost_point_set[::-1]
-        #     p_current_cost, (p_current_x, p_current_y) = came_from_cost_point_set_reversed[0]
-        #
-        #     for i in np.arange(1, len(came_from_cost_point_set_reversed), 1):
-        #         p_next_cost, (p_next_x, p_next_y) = came_from_cost_point_set_reversed[i]
-        #         dx = abs(p_current_x - p_next_x)
-        #         dy = abs(p_current_y - p_next_y)
-        #         # if (dx > 1 or dy > 1) or (dx == 0 and dy == 0):
-        #         #     #continue
-        #         #     pass
-        #         if p_next_cost > p_current_cost:
-        #             path.append((p_current_x, p_current_y))
-        #             path_costs.append((p_current_cost, (p_current_x, p_current_y)))
-        #             p_current_x = p_next_x
-        #             p_current_y = p_next_y
-        #             p_current_cost = p_next_cost
-        #
-        #     path_reversed = path[::-1]
-        #     path_costs_reversed = path_costs[::-1]
-        #     for i in np.arange(1, len(path_reversed), 1):
-        #         draw_lines(path_reversed[i - 1], [path_reversed[i]], color='black')
 
         pass
 
