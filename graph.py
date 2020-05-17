@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 plt.rcParams.update({'figure.dpi': 350})
-matplotlib.use("TkAgg")
+# matplotlib.use("TkAgg")
 
 
 class HashVertex:
@@ -409,48 +409,6 @@ class Graph:
             for i in range(0, self.nx):
                 k = self.ij2k(i, j)
 
-                # # top_right_vertex
-                # cells[k].top_right_vertex.top = cells[k].top.top_right_vertex
-                # cells[k].top_right_vertex.right = cells[k].right.top_right_vertex
-                # cells[k].top_right_vertex.bottom = cells[k].bottom_right_vertex
-                # cells[k].top_right_vertex.left = cells[k].top_left_vertex
-                # cells[k].top_right_vertex.top_right = cells[k].top.right.top_right_vertex
-                # cells[k].top_right_vertex.bottom_right = cells[k].bottom.right.bottom_right_vertex
-                # cells[k].top_right_vertex.bottom_left = cells[k].bottom_left_vertex
-                # cells[k].top_right_vertex.top_left = cells[k].top.top_left_vertex
-                #
-                # # bottom_right_vertex
-                # cells[k].bottom_right_vertex.top = cells[k].top_right_vertex
-                # cells[k].bottom_right_vertex.right = cells[k].right.bottom_right_vertex
-                # cells[k].bottom_right_vertex.bottom = cells[k].bottom.bottom_right_vertex
-                # cells[k].bottom_right_vertex.left = cells[k].bottom_left_vertex
-                # cells[k].bottom_right_vertex.top_right = cells[k].right.top_right_vertex
-                # cells[k].bottom_right_vertex.bottom_right = cells[k].bottom.right.bottom_right_vertex
-                # cells[k].bottom_right_vertex.bottom_left = cells[k].bottom.bottom_left_vertex
-                # cells[k].bottom_right_vertex.top_left = cells[k].top_left_vertex
-                #
-                # # bottom_left_vertex
-                # cells[k].bottom_left_vertex.top = cells[k].top_left_vertex
-                # cells[k].bottom_left_vertex.right = cells[k].bottom_right_vertex
-                # cells[k].bottom_left_vertex.bottom = cells[k].bottom.bottom_left_vertex
-                # cells[k].bottom_left_vertex.left = cells[k].left.bottom_left_vertex
-                # cells[k].bottom_left_vertex.top_right = cells[k].top_right_vertex
-                # cells[k].bottom_left_vertex.bottom_right = cells[k].bottom.bottom_right_vertex
-                # cells[k].bottom_left_vertex.bottom_left = cells[k].bottom.left.bottom_left_vertex
-                # cells[k].bottom_left_vertex.top_left = cells[k].left.top_left_vertex
-                #
-                # # top_left_vertex
-                # cells[k].top_left_vertex.top = cells[k].top.top_left_vertex
-                # cells[k].top_left_vertex.right = cells[k].top_right_vertex
-                # cells[k].top_left_vertex.bottom = cells[k].bottom_left_vertex
-                # cells[k].top_left_vertex.left = cells[k].left.top_left_vertex
-                # cells[k].top_left_vertex.top_right = cells[k].top.top_right_vertex
-                # cells[k].top_left_vertex.bottom_right = cells[k].bottom_right_vertex
-                # cells[k].top_left_vertex.bottom_left = cells[k].left.bottom_left_vertex
-                # cells[k].top_left_vertex.top_left = cells[k].top.left.top_left_vertex
-
-                # ---------------------
-
                 cells[k].bottom_right_vertex.top_left_cell = cells[k]
                 cells[k].bottom_right_vertex.top_right_cell = cells[k].right
                 cells[k].bottom_right_vertex.bottom_left_cell = cells[k].bottom
@@ -609,7 +567,7 @@ class Graph:
                 cost_vn = cost_v + g + self.scale() * self.h(v, vf)
 
                 queue_vertices = pq.vertices()
-                print([_c for (_c, _v) in pq.queue])
+                # print([_c for (_c, _v) in pq.queue])
 
                 if vn not in visited and vn not in queue_vertices:
                     vn.previous = v
@@ -628,23 +586,21 @@ class Graph:
 
         if is_goal_reached:
             for i in range(1, len(path)):
-                self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='black')
+                self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='red', linewidth=2)
 
     @staticmethod
     def draw_markers(ax: Axes, start: HashVertex, end: HashVertex):
-        ci = plt.Circle(xy=(start.x, start.y), radius=0.0002, color='green')
-        cf = plt.Circle(xy=(end.x, end.y), radius=0.0002, color='green')
-        ax.add_artist(ci)
-        ax.add_artist(cf)
+        ax.scatter([start.x], [start.y], marker='o', zorder=10)
+        ax.scatter([end.x], [end.y], marker='*', zorder=10)
 
     @staticmethod
-    def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None):
+    def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None, linewidth=0.5):
         lines = [([to_vertex.x, from_vertex.x], [to_vertex.y, from_vertex.y]) for to_vertex in to_vertices]
 
         for line in lines:
             xs, ys = line
-            ax.plot(xs, ys, color=color if color is not None else 'white')
-            # fig: Figure = ax.get_figure()
+            ax.plot(xs, ys, color=color if color is not None else 'white', linewidth=linewidth)
+            #fig: Figure = ax.get_figure()
             # plt.draw()  # re-draw the figure
             # plt.pause(0.000000000001)
 
@@ -666,7 +622,7 @@ class CrimeMap:
         self._geo_data_frame = gp.read_file(shape_file)
         self._points = [v[3] for v in self._geo_data_frame.values]
         bounds = self._geo_data_frame.total_bounds
-        self._graph = Graph(bounds=(bounds[0], bounds[1], bounds[2], bounds[3]), delta=0.002)
+        self._graph = Graph(bounds=(bounds[0], bounds[1], bounds[2], bounds[3]), delta=delta)
         self._set_values_to_cells()
         self._threshold_index, self._threshold_value = self._compute_thresholds_and_set_is_block_to_cells()
 
@@ -693,6 +649,29 @@ class CrimeMap:
     @property
     def threshold_value(self):
         return self._threshold_value
+
+    def plot_hist2d(self):
+        cmap = plt.cm.jet
+        cmaplist = ['yellow', 'purple']
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, cmap.N)
+
+        bounds = [200]
+        norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
+
+        plt.figure(figsize=(10, 10))
+        result = plt.hist2d([p.x for p in self.points], [p.y for p in self.points], bins=[20, 20], cmap=cmap, norm=norm)
+        vals = result[0]
+        xedges = result[1]
+        yedges = result[2]
+
+        xy_vertices = []
+        for (x, xi) in zip(xedges, range(0, len(xedges) - 1)):
+            for (y, yi) in zip(yedges, range(0, len(yedges) - 1)):
+                xy_vertices.append([x, y])
+                plt.text(x + 0.002/2, y + 0.002/2, str(vals[xi][yi]), fontdict=dict(fontsize=3, ha='center', va='center'))
+
+        # print(vals)
+        plt.show()
 
     def _set_values_to_cells(self):
         for point in self.points:
@@ -721,16 +700,20 @@ class CrimeMap:
         return threshold_index, threshold_value
 
     def plot(self) -> Axes:
+        cmap = plt.cm.jet
+        cmaplist = ['grey', 'black']
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, cmap.N)
+
         gdf = gp.GeoDataFrame({'values': [cell.norm_value for cell in self.graph.cells],
-                               'colors': ['yellow' if cell.is_block else 'purple' for cell in self.graph.cells]},
+                               'colors': ['black' if cell.is_block else 'white' for cell in self.graph.cells]},
                               geometry=[cell.polygon for cell in self.graph.cells])
 
-        ax: Axes = gdf.plot(color='yellow') if all([cell.is_block for cell in self.graph.cells]) else gdf.plot(
-            column='values', cmap='viridis')
+        ax: Axes = gdf.plot(color='black') if all([cell.is_block for cell in self.graph.cells]) else gdf.plot(
+            column='values', cmap=cmap)
 
         for cell in self.graph.cells:
             plt.text(cell.centroid.x, cell.centroid.y, str(cell.value),
-                     fontdict=dict(color='black' if cell.is_block else 'white', fontsize=3, ha='center', va='center'))
+                     fontdict=dict(color='white' if cell.is_block else 'black', fontsize=3, ha='center', va='center'))
 
         x_ticks = [x for (x, i) in zip(self.graph.xs, np.arange(0, self.graph.nx, 1)) if i % 2 == 0]
         y_ticks = [y for (y, i) in zip(self.graph.ys, np.arange(0, self.graph.ny, 1)) if i % 2 == 0]
@@ -740,8 +723,8 @@ class CrimeMap:
         ax.set_yticks(y_ticks)
         ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=4))
         ax.set_title(
-            'threshold_value={threshold_value}, std_dev={std_dev}, avg={avg}, '
-            'delta={delta}, threshold={threshold}%'.format(
+            'τ={threshold_value} ({threshold}%), σ={std_dev}, μ={avg}, '
+            'δ={delta}'.format(
                 std_dev='{:.2f}'.format(np.std([cell.value for cell in self.graph.cells])),
                 avg='{:.2f}'.format(np.average([cell.value for cell in self.graph.cells])),
                 delta='{:.3f}'.format(self.delta),
@@ -751,12 +734,12 @@ class CrimeMap:
             pad=10,
             fontdict=dict(fontsize=8))
 
-        # def onclick(event):
-        #     print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
-        #           ('double' if event.dblclick else 'single', event.button,
-        #            event.x, event.y, event.xdata, event.ydata))
-        #
-        # cid = ax.get_figure().canvas.mpl_connect('button_press_event', onclick)
+        def onclick(event):
+            print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
+                  ('double' if event.dblclick else 'single', event.button,
+                   event.x, event.y, event.xdata, event.ydata))
+
+        cid = ax.get_figure().canvas.mpl_connect('button_press_event', onclick)
 
         plt.draw()
 
@@ -766,10 +749,14 @@ class CrimeMap:
 def main():
     plt.ion()
     start_time = time()
-    crime_map: CrimeMap = CrimeMap(shape_file="./Shape/crime_dt.shp", delta=0.002, threshold_percent=65)
+    crime_map: CrimeMap = CrimeMap(shape_file="./Shape/crime_dt.shp", delta=0.002, threshold_percent=50)
     ax: Axes = crime_map.plot()
+
+    # crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.589, 45.492))
+    crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.572, 45.504))
     # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.555, 45.514))
-    crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.562, 45.506))
+    # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.562, 45.506))
+
     end_time = time()
     exec_time = end_time - start_time
     print('exec_time: ' + str(exec_time))
