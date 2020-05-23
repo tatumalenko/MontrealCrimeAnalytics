@@ -531,13 +531,12 @@ class Graph:
         vf = self.closest_vertex(end)
         visited: Set[HashVertex] = set()
         path: List[HashVertex] = []
-
+        cost_v: float = 0.0
         self.draw_markers(ax=ax, start=vi, end=vf)
 
         pq.put((0, vi))
 
         while not pq.empty():
-            cost_v: float
             v: HashVertex
             cost_v, v = pq.get()
 
@@ -564,8 +563,11 @@ class Graph:
 
             for cost_neighbour_pair in cost_neighbour_pairs:
                 (g, vn) = cost_neighbour_pair
-                cost_vn = cost_v + g + self.scale() * self.h(v, vf)
-
+                #cost_vn = cost_v + g + self.scale() * self.h(v, vf)
+                cost_h = np.floor((self.h(v, vf) / self.delta) - 2.0) * 0.0
+                cost_h = 0 if cost_h < 0 else cost_h
+                cost_vn = (cost_v + g + self.scale() * cost_h)
+                print('cost_vn: ' + str(cost_vn) + '; cost_hv: ' + str(cost_h))
                 queue_vertices = pq.vertices()
                 # print([_c for (_c, _v) in pq.queue])
 
@@ -585,6 +587,8 @@ class Graph:
         print('is_goal_reached: ' + str(is_goal_reached))
 
         if is_goal_reached:
+            print('path_cost: ' + str(cost_v))
+
             for i in range(1, len(path)):
                 self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='red', linewidth=2)
 
@@ -650,29 +654,6 @@ class CrimeMap:
     def threshold_value(self):
         return self._threshold_value
 
-    def plot_hist2d(self):
-        cmap = plt.cm.jet
-        cmaplist = ['yellow', 'purple']
-        cmap = matplotlib.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, cmap.N)
-
-        bounds = [200]
-        norm = matplotlib.colors.BoundaryNorm(bounds, cmap.N)
-
-        plt.figure(figsize=(10, 10))
-        result = plt.hist2d([p.x for p in self.points], [p.y for p in self.points], bins=[20, 20], cmap=cmap, norm=norm)
-        vals = result[0]
-        xedges = result[1]
-        yedges = result[2]
-
-        xy_vertices = []
-        for (x, xi) in zip(xedges, range(0, len(xedges) - 1)):
-            for (y, yi) in zip(yedges, range(0, len(yedges) - 1)):
-                xy_vertices.append([x, y])
-                plt.text(x + 0.002/2, y + 0.002/2, str(vals[xi][yi]), fontdict=dict(fontsize=3, ha='center', va='center'))
-
-        # print(vals)
-        plt.show()
-
     def _set_values_to_cells(self):
         for point in self.points:
             xi = min(int(np.floor((point.x - self.graph.x_min) / self.delta)), self.graph.nx - 1)
@@ -699,7 +680,7 @@ class CrimeMap:
 
         return threshold_index, threshold_value
 
-    def plot(self) -> Axes:
+    def plot(self, ax: Axes) -> Axes:
         cmap = plt.cm.jet
         cmaplist = ['grey', 'black']
         cmap = matplotlib.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, cmap.N)
@@ -709,11 +690,11 @@ class CrimeMap:
                               geometry=[cell.polygon for cell in self.graph.cells])
 
         ax: Axes = gdf.plot(color='black') if all([cell.is_block for cell in self.graph.cells]) else gdf.plot(
-            column='values', cmap=cmap)
+            column='values', cmap=cmap, ax=ax)
 
         for cell in self.graph.cells:
-            plt.text(cell.centroid.x, cell.centroid.y, str(cell.value),
-                     fontdict=dict(color='white' if cell.is_block else 'black', fontsize=3, ha='center', va='center'))
+            ax.text(cell.centroid.x, cell.centroid.y, str(cell.value),
+                    fontdict=dict(color='white' if cell.is_block else 'black', fontsize=3, ha='center', va='center'))
 
         x_ticks = [x for (x, i) in zip(self.graph.xs, np.arange(0, self.graph.nx, 1)) if i % 2 == 0]
         y_ticks = [y for (y, i) in zip(self.graph.ys, np.arange(0, self.graph.ny, 1)) if i % 2 == 0]
@@ -734,34 +715,65 @@ class CrimeMap:
             pad=10,
             fontdict=dict(fontsize=8))
 
-        def onclick(event):
-            print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
-                  ('double' if event.dblclick else 'single', event.button,
-                   event.x, event.y, event.xdata, event.ydata))
-
-        cid = ax.get_figure().canvas.mpl_connect('button_press_event', onclick)
+        # def onclick(event):
+        #     print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
+        #           ('double' if event.dblclick else 'single', event.button,
+        #            event.x, event.y, event.xdata, event.ydata))
+        #
+        # cid = ax.get_figure().canvas.mpl_connect('button_press_event', onclick)
 
         plt.draw()
 
         return ax
 
-
 def main():
-    plt.ion()
-    start_time = time()
-    crime_map: CrimeMap = CrimeMap(shape_file="./Shape/crime_dt.shp", delta=0.002, threshold_percent=50)
-    ax: Axes = crime_map.plot()
 
-    # crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.589, 45.492))
-    crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.572, 45.504))
-    # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.555, 45.514))
-    # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.562, 45.506))
 
-    end_time = time()
-    exec_time = end_time - start_time
-    print('exec_time: ' + str(exec_time))
-    plt.ioff()
-    plt.show()
+    # -73.554, 45.526
+    # -73.554, 45.504
+    # -73.554, 45.502
+    loop = True
+    delta_default = 0.002
+    threshold_percent_default = 50
+    x_start_default = -73.589
+    y_start_default = 45.491
+    x_end_default = -73.554
+    y_end_default = 45.502
+    while loop:
+        ax = plt.axes()
+        delta = input(f'delta: ({delta_default}) ')
+        delta = delta if not delta == '' else delta_default
+        threshold_percent = input(f'threshold%: ({threshold_percent_default}) ')
+        threshold_percent = threshold_percent if not threshold_percent == '' else threshold_percent_default
+        start_coords = input(f'start: ({x_start_default}, {y_start_default}) ')
+        [start_x, start_y] = start_coords.split(', ') if not start_coords == '' else ['', '']
+        end_coords = input(f'end: ({x_end_default}, {y_end_default}) ')
+        [end_x, end_y] = end_coords.split(', ') if not end_coords == '' else ['', '']
+
+        plt.ion()
+        start_time = time()
+
+        crime_map: CrimeMap = CrimeMap(shape_file="./Shape/crime_dt.shp", delta=float(delta),
+                                       threshold_percent=float(threshold_percent))
+        crime_map.plot_hist2d()
+        ax: Axes = crime_map.plot(ax)
+
+        # crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.589, 45.492))
+        crime_map.graph.search(ax=ax,
+                               start=Point(float(start_x) if not start_x == '' else x_start_default,
+                                           float(start_y) if not start_y == '' else y_start_default),
+                               end=Point(float(end_x) if not end_x == '' else x_end_default,
+                                         float(end_y) if not end_y == '' else y_end_default))
+        # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.555, 45.514))
+        # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.562, 45.506))
+
+        end_time = time()
+        exec_time = end_time - start_time
+        print('exec_time: ' + str(exec_time))
+        plt.draw()  # re-draw the figure
+        plt.pause(0.000000000001)
+        plt.ioff()
+        plt.show()
 
 
 if __name__ == '__main__':
