@@ -16,12 +16,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 plt.rcParams.update({'figure.dpi': 350})
-# matplotlib.use("TkAgg")
 
 
 class HashVertex:
     _x: float
     _y: float
+    _i: int
+    _j: int
     _point: Tuple[float, float]
     _previous: Optional['HashVertex']
     _next: Optional['HashVertex']
@@ -35,9 +36,11 @@ class HashVertex:
     _cost_h: float
     _cost_f: float
 
-    def __init__(self, x: float, y: float):
+    def __init__(self, x: float, y: float, i: int, j: int):
         self._x = x
         self._y = y
+        self._i = i
+        self._j = j
         self._point = (x, y)
         self._previous = None
         self._next = None
@@ -66,6 +69,14 @@ class HashVertex:
     @property
     def y(self) -> float:
         return self._y
+
+    @property
+    def i(self) -> int:
+        return self._i
+
+    @property
+    def j(self) -> int:
+        return self._j
 
     @property
     def point(self) -> Tuple[float, float]:
@@ -143,7 +154,7 @@ class HashVertex:
     def cost_f(self) -> float:
         return self.cost_g + self.cost_h
 
-    def distance(self, vertex: 'HashVertex'):
+    def distance(self, vertex: Union['HashVertex', Point]):
         return (((self.x - vertex.x) ** 2) + ((self.y - vertex.y) ** 2)) ** 0.5
 
     def __eq__(self, other: 'HashVertex') -> bool:
@@ -178,7 +189,7 @@ class HashCell:
     top: Optional['HashCell']
     bottom: Optional['HashCell']
 
-    def __init__(self, polygon: Polygon):
+    def __init__(self, polygon: Polygon, i: int, j: int):
         self._polygon: Polygon = polygon
         (x_min, y_min, x_max, y_max) = polygon.bounds
         self._x_min = x_min
@@ -189,10 +200,10 @@ class HashCell:
         self._value = 0
         self._norm_value = 0
         self._is_block = False
-        self._bottom_left_vertex = HashVertex(self._x_min, self._y_min)
-        self._top_left_vertex = HashVertex(self._x_min, self._y_max)
-        self._bottom_right_vertex = HashVertex(self._x_max, self._y_min)
-        self._top_right_vertex = HashVertex(self._x_max, self._y_max)
+        self._bottom_left_vertex = HashVertex(self._x_min, self._y_min, i, j)
+        self._top_left_vertex = HashVertex(self._x_min, self._y_max, i, j + 1)
+        self._bottom_right_vertex = HashVertex(self._x_max, self._y_min, i + 1, j)
+        self._top_right_vertex = HashVertex(self._x_max, self._y_max, i + 1, j + 1)
         self._vertices: Set[HashVertex] = {
             self._bottom_left_vertex,
             self._top_left_vertex,
@@ -401,15 +412,16 @@ class Graph:
         y_bottom_origin = self.y_min
         y_top_origin = self.y_min + self.delta
 
-        for _ in self.ys:
+        for j, _ in zip(range(len(self.ys)), self.ys):
             x_left = x_left_origin
             x_right = x_right_origin
-            for _ in self.xs:
+            for i, _ in zip(range(len(self.xs)), self.xs):
                 cell = HashCell(Polygon(
                     [(x_left, y_top_origin),
                      (x_right, y_top_origin),
                      (x_right, y_bottom_origin),
-                     (x_left, y_bottom_origin)]))
+                     (x_left, y_bottom_origin)]),
+                    i=i, j=j)
                 cells.append(cell)
                 x_left += self.delta
                 x_right += self.delta
@@ -466,13 +478,14 @@ class Graph:
     def closest_indices(self, point: Union[Point, HashVertex]) -> Tuple[int, int]:
         xi = min(int(np.round(max(point.x - self.x_min, 0) / self.delta)), self.nx)
         yi = min(int(np.round(max(point.y - self.y_min, 0) / self.delta)), self.ny)
+
         return xi, yi
 
     def closest_vertex(self, point: Point) -> HashVertex:
         closest_distance = float('inf')
         closest_vertex: Optional[HashVertex] = None
         for vertex in self.vertices:
-            distance = vertex.distance(HashVertex(point.x, point.y))
+            distance = vertex.distance(point)
             if distance < closest_distance:
                 closest_distance = distance
                 closest_vertex = vertex
@@ -550,8 +563,8 @@ class Graph:
         return set(cost_neighbour_pairs)
 
     def h(self, vn: HashVertex, vf: HashVertex) -> float:
-        xn, yn = self.closest_indices(vn)
-        xf, yf = self.closest_indices(vf)
+        xn, yn = vn.i, vn.j
+        xf, yf = vf.i, vf.j
         delta_x = abs(xf - xn)
         delta_y = abs(yf - yn)
         delta_min = min(delta_x, delta_y)
@@ -560,7 +573,8 @@ class Graph:
         delta_orthogonal = delta_max - delta_diagonal
         return delta_orthogonal * 1.0 + delta_diagonal * 1.5
 
-    def search(self, ax: Axes, start: Point, end: Point) -> float:
+    def search(self, ax: Axes, start: Point, end: Point, output: tkinter.Text) -> float:
+        output.delete('1.0', tkinter.END)
         pq: VertexSearchQueue[Tuple[float, HashVertex]] = VertexSearchQueue()
         is_goal_reached: bool = False
         vi = self.closest_vertex(start)
@@ -570,7 +584,11 @@ class Graph:
         cost_path: float = float('Inf')
         cost_table = []
 
-        pq.put((0, vi))
+        vi.cost_h = self.h(vi, vf)
+        output.insert(tkinter.END, '\n' + f'initial_h: {vi.cost_h}')
+        output.insert(tkinter.END, '\n' + f'initial: {vi.i},{vi.j} ({vi.x},{vi.y})')
+        output.insert(tkinter.END, '\n' + f'final: {vf.i},{vf.j} ({vf.x},{vf.y})')
+        pq.put((vi.cost_h, vi))
 
         while not pq.empty():
             v: HashVertex
@@ -582,16 +600,9 @@ class Graph:
                 path.append(v)
 
                 while v.previous is not None:
-                    step_cost = v.cost_g - v.previous.cost_g
-                    h_prime = v.cost_h
-                    h = v.previous.cost_h
-                    step_cost_plus_h_prime = step_cost + h_prime
-                    h_star = cost_path - v.previous.cost_g
-                    h_str = '{:.2f}'.format(h)
-                    h_star_str = '{:.2f}'.format(h_star)
-                    step_cost_plus_h_prime_str = '{:.2f}'.format(step_cost_plus_h_prime)
-                    cost_table.append(f'h*(n)={h_star_str}, h(n)={h_str}, h(n)<=h*(n): {h <= h_star}, c(n,n\')+h(n\')={step_cost_plus_h_prime_str}, c(n,n\')+h(n\')>=h(n): {step_cost_plus_h_prime >= h}')
                     path.append(v.previous)
+                    if v == vi:
+                        break
                     v = v.previous
 
                 path.reverse()
@@ -607,7 +618,6 @@ class Graph:
                 cost_h = self.h(vn, vf)
                 cost_g = v.cost_g + g
 
-                print('cost_gn: ' + str(cost_g) + '; cost_hn: ' + str(cost_h) + '; cost_fn: ' + str(cost_g + cost_h))
                 queue_vertices = pq.vertices()
 
                 if vn not in visited and vn not in queue_vertices:
@@ -619,8 +629,7 @@ class Graph:
                 elif vn in queue_vertices:
                     (cost_fn_same, vn_same) = pq.find(vn)
 
-                    # replace lower cost vertex
-                    if vn_same.cost_g > cost_g:
+                    if cost_fn_same > cost_g + cost_h:
                         vn.previous = v
 
                         vn.cost_g = cost_g
@@ -628,16 +637,27 @@ class Graph:
 
                         pq = pq.replace(to_remove=vn, to_put=(vn.cost_f, vn))
 
-        print('is_goal_reached: ' + str(is_goal_reached))
+        output.insert(tkinter.END, '\n' + 'is_goal_reached: ' + str(is_goal_reached))
 
         if is_goal_reached:
+            path = path[path.index(vi):]
             for i in range(1, len(path)):
                 self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='red', linewidth=2)
+                step_cost = path[i].cost_g - path[i - 1].cost_g
+                h_prime = path[i].cost_h
+                h = path[i - 1].cost_h
+                step_cost_plus_h_prime = step_cost + h_prime
+                h_star = cost_path - path[i - 1].cost_g
+                h_str = '{:.2f}'.format(h)
+                h_star_str = '{:.2f}'.format(h_star)
+                step_cost_plus_h_prime_str = '{:.2f}'.format(step_cost_plus_h_prime)
+                cost_table.append(
+                    f'h*(n)={h_star_str}, h(n)={h_str}, h(n)<=h*(n): {h <= h_star}, c(n,n\')+h(n\')={step_cost_plus_h_prime_str}, c(n,n\')+h(n\')>=h(n): {step_cost_plus_h_prime >= h}')
 
-        cost_table.reverse()
         for cost_element in cost_table:
-            print(cost_element)
+            output.insert(tkinter.END, '\n' + cost_element)
 
+        output.see(tkinter.END)
         return cost_path
 
     @staticmethod
@@ -646,7 +666,7 @@ class Graph:
             ax.plot([vertex.previous.x, vertex.x], [vertex.previous.y, vertex.y], color=color, linewidth=linewidth)
 
     @staticmethod
-    def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None, linewidth=0.5):
+    def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None, linewidth=0.1):
         lines = [([to_vertex.x, from_vertex.x], [to_vertex.y, from_vertex.y]) for to_vertex in to_vertices]
 
         for line in lines:
@@ -734,8 +754,7 @@ class CrimeMap:
                                'colors': ['black' if cell.is_block else 'white' for cell in self.graph.cells]},
                               geometry=[cell.polygon for cell in self.graph.cells])
 
-        ax: Axes = gdf.plot(color='black') if all([cell.is_block for cell in self.graph.cells]) else gdf.plot(
-            column='values', cmap=cmap, ax=ax)
+        ax: Axes = gdf.plot(column='values', cmap=cmap, ax=ax)
 
         for cell in self.graph.cells:
             ax.text(cell.centroid.x, cell.centroid.y, str(cell.value),
@@ -745,9 +764,9 @@ class CrimeMap:
         y_ticks = [y for (y, i) in zip(self.graph.ys, np.arange(0, self.graph.ny, 1)) if i % 2 == 0]
 
         ax.set_xticks(x_ticks)
-        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=4))
+        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=3))
         ax.set_yticks(y_ticks)
-        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=4))
+        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=3))
         ax.set_title(
             'τ={threshold_value} ({threshold}%), σ={std_dev}, μ={avg}, '
             'δ={delta}'.format(
@@ -758,7 +777,7 @@ class CrimeMap:
                 threshold_value=self.threshold_value
             ),
             pad=10,
-            fontdict=dict(fontsize=8))
+            fontdict=dict(fontsize=6))
 
         return ax
 
@@ -785,12 +804,8 @@ class Main:
         self._threshold_percent = 50
 
     def run(self):
-        # plt.ion()
-        # self.fig, (self.ax, self.ax_controls) = plt.subplots(1, 2)
         self.fig = plt.figure(figsize=(5, 3))
-        # self.fig_controls = plt.figure(figsize=(2, 2))
-        self.ax = plt.subplot2grid((1, 4), (0, 0), colspan=3, fig=self.fig)
-        # self.ax_controls = self.fig_controls.gca()  # plt.subplot2grid((1, 3), (0, 2), fig=self.fig)
+        self.ax = plt.subplot2grid((1, 10), (0, 0), colspan=6, fig=self.fig)
 
         self.canvas = FigureCanvasTkAgg(self.fig, self.root)
         self._draw_map()
@@ -801,6 +816,7 @@ class Main:
 
         self.sv1 = tkinter.StringVar(value='0.002')
         self.sv2 = tkinter.StringVar(value='50')
+        self.sv3 = tkinter.StringVar(value='Starting..')
 
         l1 = tkinter.Label(self.root, text='Width:', width=8)
         l1.pack(side=tkinter.LEFT)
@@ -817,6 +833,11 @@ class Main:
         e1.bind('<Return>', self._onsubmit_delta)
         e2.bind('<Return>', self._onsubmit_threshold_percent)
 
+        txt = tkinter.Text(self.root, width=100, height=65)
+        txt.place(relx=0.60, rely=0.12)
+        txt.insert(tkinter.END, 'Starting...')
+        self.txt = txt
+
         self.root.mainloop()
 
     def _draw_map(self):
@@ -824,14 +845,13 @@ class Main:
                                   delta=self._delta,
                                   threshold_percent=self._threshold_percent)
         self.crime_map.plot(self.ax)
-        # self.canvas.draw_idle()
-        self.fig.canvas.draw_idle()
+        self.fig.canvas.draw()
 
     def _draw_marker(self, point: Point, is_start: bool):
         self.ax.plot([point.x], [point.y],
                      marker='o' if is_start else '*',
                      color='green' if is_start else 'yellow', zorder=10)
-        self.fig.canvas.draw_idle()
+        self.fig.canvas.draw()
 
     def _onclick(self, event):
         x, y = event.xdata, event.ydata
@@ -847,20 +867,21 @@ class Main:
                 self._draw_marker(self.goal, False)
 
                 self._should_set_start_next = True
-                cost_path = self.crime_map.graph.search(ax=self.ax, start=self.start, end=self.goal)
-                self.ax.set_title(
-                    self.ax.get_title() + ', f=' + ('{:.2f}'.format(cost_path) if not cost_path == float('Inf') else '∞'),
-                    fontdict=dict(fontsize=self.ax.title.get_fontsize()))
-                self.fig.canvas.draw_idle()
+                s_time = time()
+                cost_path = self.crime_map.graph.search(ax=self.ax, start=self.start, end=self.goal, output=self.txt)
+                e_time = time()
+                t_time = '{:.2f}'.format(e_time - s_time)
+                cost_path_str = '{:.2f}'.format(cost_path)
+                self.txt.insert(tkinter.END, '\n' + f'path_cost: {cost_path_str}')
+                self.txt.insert(tkinter.END, '\n' + f'exec_time: {t_time} secs')
+                self.fig.canvas.draw()
 
     def _onsubmit_delta(self, event):
-        print('delta')
         self._delta = float(self.sv1.get())
         self.ax.clear()
         self._draw_map()
 
     def _onsubmit_threshold_percent(self, event):
-        print('threshold')
         self._threshold_percent = float(self.sv2.get())
         self.ax.clear()
         self._draw_map()
@@ -879,13 +900,6 @@ class Main:
         ax_threshold = self.fig.add_axes([0.8, 0.4, 0.1, 0.05])
         self.tb_threshold = TextBox(ax_threshold, 'Threshold%', initial=str(self._threshold_percent))
         self.tb_threshold.on_submit(self._onsubmit_threshold_percent)
-
-        # self.tb_delta.label.set_fontsize(6)
-        # self.tb_delta.text_disp.set_fontsize(6)
-        # # self.tb_delta.connect_event('key_press_event', self._ontextchange)
-        # self.tb_threshold.label.set_fontsize(6)
-        # self.tb_threshold.text_disp.set_fontsize(6)
-        # self.tb_threshold.connect_event('key_press_event', self._ontextchange)
 
 
 if __name__ == '__main__':
