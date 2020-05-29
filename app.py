@@ -1,604 +1,906 @@
+import tkinter
 from queue import PriorityQueue
 from time import time
-from typing import Tuple, List
+from typing import Tuple, Optional, List, Set, Any, Union
 
-import matplotlib.pyplot as plt
-import matplotlib
-import numpy as np
-import geopandas as gp
 from geopandas import GeoDataFrame
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.widgets import TextBox
 from shapely.geometry import Polygon, Point
+import numpy as np
+import geopandas as gp
+import matplotlib.pyplot as plt
+import matplotlib
 
 plt.rcParams.update({'figure.dpi': 350})
-matplotlib.use("TkAgg")
 
 
-class CoordIntensityPair:
-    def __init__(self, coord: Tuple[float, float]):
-        self._coord: Tuple[float, float] = coord
-        self._intensity: int = 0
-        self._is_block = False
+class HashVertex:
+    _x: float
+    _y: float
+    _i: int
+    _j: int
+    _point: Tuple[float, float]
+    _previous: Optional['HashVertex']
+    _next: Optional['HashVertex']
+    _cells: Optional[List['HashCell']]
+    _hash_value: int
+    _bottom_left_cell: Optional['HashCell']
+    _bottom_right_cell: Optional['HashCell']
+    _top_left_cell: Optional['HashCell']
+    _top_right_cell: Optional['HashCell']
+    _cost_g: float
+    _cost_h: float
+    _cost_f: float
+
+    def __init__(self, x: float, y: float, i: int, j: int):
+        self._x = x
+        self._y = y
+        self._i = i
+        self._j = j
+        self._point = (x, y)
+        self._previous = None
+        self._next = None
+        self._bottom_left_cell = None
+        self._bottom_right_cell = None
+        self._top_left_cell = None
+        self._top_right_cell = None
+        self._cells = []
+        self._hash_value = hash(self._point)
+        self.top: Optional['HashVertex'] = None
+        self.top_right: Optional['HashVertex'] = None
+        self.right: Optional['HashVertex'] = None
+        self.bottom_right: Optional['HashVertex'] = None
+        self.bottom: Optional['HashVertex'] = None
+        self.bottom_left: Optional['HashVertex'] = None
+        self.left: Optional['HashVertex'] = None
+        self.top_left: Optional['HashVertex'] = None
+        self._cost_g: float = 0.0
+        self._cost_h: float = 0.0
+        self._cost_f: float = 0.0
 
     @property
-    def coord(self):
-        return self._coord
+    def x(self) -> float:
+        return self._x
 
     @property
-    def intensity(self) -> int:
-        return self._intensity
+    def y(self) -> float:
+        return self._y
 
-    @intensity.setter
-    def intensity(self, value):
-        self._intensity = value
+    @property
+    def i(self) -> int:
+        return self._i
+
+    @property
+    def j(self) -> int:
+        return self._j
+
+    @property
+    def point(self) -> Tuple[float, float]:
+        return self._point
+
+    @property
+    def previous(self) -> Optional['HashVertex']:
+        return self._previous
+
+    @previous.setter
+    def previous(self, vertex: 'HashVertex'):
+        self._previous = vertex
+
+    @property
+    def next(self) -> Optional['HashVertex']:
+        return self._next
+
+    @next.setter
+    def next(self, vertex: 'HashVertex'):
+        self._next = vertex
+
+    @property
+    def bottom_left_cell(self):
+        return self._bottom_left_cell
+
+    @bottom_left_cell.setter
+    def bottom_left_cell(self, cell: 'HashCell'):
+        self._bottom_left_cell = cell
+
+    @property
+    def bottom_right_cell(self):
+        return self._bottom_right_cell
+
+    @bottom_right_cell.setter
+    def bottom_right_cell(self, cell: 'HashCell'):
+        self._bottom_right_cell = cell
+
+    @property
+    def top_left_cell(self):
+        return self._top_left_cell
+
+    @top_left_cell.setter
+    def top_left_cell(self, cell: 'HashCell'):
+        self._top_left_cell = cell
+
+    @property
+    def top_right_cell(self):
+        return self._top_right_cell
+
+    @top_right_cell.setter
+    def top_right_cell(self, cell: 'HashCell'):
+        self._top_right_cell = cell
+
+    @property
+    def cells(self) -> List['HashCell']:
+        return self._cells
+
+    @property
+    def cost_g(self) -> float:
+        return self._cost_g
+
+    @cost_g.setter
+    def cost_g(self, cost_g: float):
+        self._cost_g = cost_g
+
+    @property
+    def cost_h(self) -> float:
+        return self._cost_h
+
+    @cost_h.setter
+    def cost_h(self, cost_h: float):
+        self._cost_h = cost_h
+
+    @property
+    def cost_f(self) -> float:
+        return self.cost_g + self.cost_h
+
+    def distance(self, vertex: Union['HashVertex', Point]):
+        return (((self.x - vertex.x) ** 2) + ((self.y - vertex.y) ** 2)) ** 0.5
+
+    def __eq__(self, other: 'HashVertex') -> bool:
+        return self.point == other.point
+
+    def __hash__(self) -> int:
+        return self._hash_value
+
+    def __lt__(self, other: 'HashVertex') -> bool:
+        return self._hash_value < other._hash_value
 
 
-class PolygonIntensityPair:
-    def __init__(self, polygon: Polygon, order: int):
+class HashCell:
+    _polygon: Polygon
+    _value: int
+    _norm_value: int
+    _is_block: bool
+    _x_min: float
+    _y_min: float
+    _x_max: float
+    _y_max: float
+    _centroid: Point
+    _bottom_right_vertex: HashVertex
+    _top_left_vertex: HashVertex
+    _bottom_left_vertex: HashVertex
+    _top_right_vertex: HashVertex
+    _vertices: Set[HashVertex]
+    _points: Tuple[HashVertex, HashVertex, HashVertex, HashVertex]
+    _hash_value: int
+    left: Optional['HashCell']
+    right: Optional['HashCell']
+    top: Optional['HashCell']
+    bottom: Optional['HashCell']
+
+    def __init__(self, polygon: Polygon, i: int, j: int):
         self._polygon: Polygon = polygon
-        self._intensity: int = 0
-        self._order: int = order
-        self._is_block: bool = False
-
-    @staticmethod
-    def make(polygon: Polygon, intensity: int, order: int):
-        this = PolygonIntensityPair(polygon, order)
-        this.intensity = intensity
-        return this
+        (x_min, y_min, x_max, y_max) = polygon.bounds
+        self._x_min = x_min
+        self._y_min = y_min
+        self._x_max = x_max
+        self._y_max = y_max
+        self._centroid = Point((self.x_max - self.x_min) / 2 + self.x_min, (self.y_max - self.y_min) / 2 + self.y_min)
+        self._value = 0
+        self._norm_value = 0
+        self._is_block = False
+        self._bottom_left_vertex = HashVertex(self._x_min, self._y_min, i, j)
+        self._top_left_vertex = HashVertex(self._x_min, self._y_max, i, j + 1)
+        self._bottom_right_vertex = HashVertex(self._x_max, self._y_min, i + 1, j)
+        self._top_right_vertex = HashVertex(self._x_max, self._y_max, i + 1, j + 1)
+        self._vertices: Set[HashVertex] = {
+            self._bottom_left_vertex,
+            self._top_left_vertex,
+            self._bottom_right_vertex,
+            self._top_right_vertex
+        }
+        self._points = (
+            self._bottom_left_vertex,
+            self._top_left_vertex,
+            self._bottom_right_vertex,
+            self._top_right_vertex
+        )
+        self._hash_value = hash(self._points)
+        self.left = None
+        self.right = None
+        self.top = None
+        self.bottom = None
 
     @property
-    def polygon(self):
+    def polygon(self) -> Polygon:
         return self._polygon
 
     @property
-    def intensity(self) -> int:
-        return self._intensity
-
-    @intensity.setter
-    def intensity(self, value):
-        self._intensity = value
+    def x_min(self) -> float:
+        return self._x_min
 
     @property
-    def order(self):
-        return self._order
+    def x_max(self) -> float:
+        return self._x_max
 
     @property
-    def is_block(self):
+    def y_min(self) -> float:
+        return self._y_min
+
+    @property
+    def y_max(self) -> float:
+        return self._y_max
+
+    @property
+    def centroid(self) -> Point:
+        return self._centroid
+
+    @property
+    def bottom_left_vertex(self) -> 'HashVertex':
+        return self._bottom_left_vertex
+
+    @property
+    def bottom_right_vertex(self) -> 'HashVertex':
+        return self._bottom_right_vertex
+
+    @property
+    def top_right_vertex(self) -> 'HashVertex':
+        return self._top_right_vertex
+
+    @property
+    def top_left_vertex(self) -> 'HashVertex':
+        return self._top_left_vertex
+
+    @property
+    def vertices(self) -> Set[HashVertex]:
+        return self._vertices
+
+    @property
+    def points(self) -> Tuple[HashVertex, HashVertex, HashVertex, HashVertex]:
+        return self._points
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    @value.setter
+    def value(self, val: int):
+        self._value = val
+
+    @property
+    def norm_value(self) -> int:
+        return self._norm_value
+
+    @norm_value.setter
+    def norm_value(self, val: int):
+        self._norm_value = val
+
+    @property
+    def is_block(self) -> bool:
         return self._is_block
 
     @is_block.setter
-    def is_block(self, value):
-        self._is_block = value
+    def is_block(self, val: bool):
+        self._is_block = val
+
+    def __eq__(self, other: 'HashCell') -> bool:
+        return self.points == other.points
+
+    def __hash__(self) -> int:
+        return self._hash_value
 
 
-class CrimeMap:
-    def __init__(self, shape_file: str, grid_delta: float, threshold_percent: float):
-        self._shape_file: str = shape_file
-        self._delta: float = grid_delta
-        self._threshold_percent: float = threshold_percent
-        self._geo_data_frame: GeoDataFrame = gp.read_file(shape_file)
-        bounds = self._geo_data_frame.total_bounds
-        self._x_min: int = bounds[0]
-        self._y_min: int = bounds[1]
-        self._x_max: int = bounds[2]
-        self._y_max: int = bounds[3]
-        self._x_range: np.ndarray = np.arange(self._x_min, self._x_max, self._delta)
-        self._y_range: np.ndarray = np.arange(self._y_min, self._y_max, self._delta)
-        self._coord_size: int = len(self._y_range)
+class VertexSearchQueue(PriorityQueue):
+    def vertices(self) -> List[HashVertex]:
+        return [v for (_, v) in self.queue]
 
-        self._points: List[Point] = self._make_points()
+    def find(self, vertex: HashVertex) -> Tuple[Any, HashVertex]:
+        vs: List[HashVertex] = self.vertices()
+        idx: int = vs.index(vertex)
+        return self.queue[idx]
 
-        polygons, centroids = self._make_polygons2()
-        self._polygons = polygons
-        self._centroids = centroids
+    def remove(self, vertex: HashVertex) -> 'VertexSearchQueue[Tuple[Any, HashVertex]]':
+        pq: VertexSearchQueue[Tuple[Any, HashVertex]] = VertexSearchQueue()
+        for (priority, v) in self.queue:
+            if not v == vertex:
+                pq.put((priority, v))
+        return pq
 
-        computed_statistics = self.compute_statistics()
-        self._vertices: List[Tuple[float, float]] = computed_statistics['vertices']
-        self._coord_intensities: List[CoordIntensityPair] = computed_statistics['coord_intensities']
-        self._polygon_intensities: List[PolygonIntensityPair] = computed_statistics['polygon_intensities']
+    def replace(self,
+                to_remove: HashVertex,
+                to_put: Tuple[Any, HashVertex]) -> 'VertexSearchQueue[Tuple[Any, HashVertex]]':
+        pq: VertexSearchQueue[Tuple[Any, HashVertex]] = self.remove(to_remove)
+        pq.put(to_put)
+        return pq
 
-        self._values: List[int] = computed_statistics['values']
 
-        self._sorted_polygon_intensities: List[PolygonIntensityPair] = computed_statistics['sorted_polygon_intensities']
-        self._sorted_polygons: List[Polygon] = computed_statistics['sorted_polygons']
-        self._sorted_centroids: List[Polygon] = computed_statistics['sorted_centroids']
-        self._sorted_values: List[int] = computed_statistics['sorted_values']
+class Graph:
+    _bounds: Tuple[float, float, float, float]
+    _x_min: float
+    _y_min: float
+    _x_max: float
+    _y_max: float
+    _delta: float
+    _xs: List[float]
+    _ys: List[float]
+    _nx: int
+    _ny: int
+    _cells: List[HashCell]
+    _vertices: List[HashVertex]
 
-        self._inflection_index: int = computed_statistics['inflection_index']
-        self._colors: List[str] = computed_statistics['colors']
-        self._sorted_norm_values: List[int] = computed_statistics['sorted_norm_values']
+    def __init__(self, bounds: Tuple[float, float, float, float], delta: float):
+        self._bounds = bounds
+        (x_min, y_min, x_max, y_max) = bounds
+        self._x_min = x_min
+        self._y_min = y_min
+        self._x_max = x_max
+        self._y_max = y_max
+        self._delta = delta
+        self._xs = list(np.arange(x_min, x_max, delta))
+        self._ys = list(np.arange(y_min, y_max, delta))
+        self._nx = len(self._xs)
+        self._ny = len(self._ys)
+        self._cells, self._vertices = self._make_grid()
 
-        self._n_high: int = computed_statistics['n_high']
-        self._v_min: int = computed_statistics['v_min']
-        self._v_max: int = computed_statistics['v_max']
-        self._v_median: float = computed_statistics['median']
-        self._v_sum: int = computed_statistics['sum_values']
-        self._v_std_dev: float = computed_statistics['std_dev']
-        self._v_avg: float = computed_statistics['avg']
+    @property
+    def x_min(self) -> float:
+        return self._x_min
 
-        self._xs: List[float] = list(self._x_range)
-        self._xs.append(self._x_max)
-        self._ys: List[float] = list(self._y_range)
-        self._ys.append(self._y_max)
+    @property
+    def y_min(self) -> float:
+        return self._y_min
 
-        self._grid: List[Tuple[float, float]] = self._make_grid()
-        self._grid_x_dim: int = len(self._xs)
+    @property
+    def x_max(self) -> float:
+        return self._x_max
 
-    def plot_crime_points(self):
-        self._geo_data_frame.plot()
-        plt.show()
+    @property
+    def y_max(self) -> float:
+        return self._y_max
 
-    def _make_points(self) -> List[Point]:
-        coord_pairs: List[Point] = [v[3] for v in self._geo_data_frame.values]
-        return coord_pairs
+    @property
+    def delta(self) -> float:
+        return self._delta
 
-    def _make_polygons2(self):
-        delta = self._delta
-        x_left_origin = self._x_min
-        x_right_origin = self._x_min + delta
-        y_bottom_origin = self._y_min
-        y_top_origin = self._y_min + delta
-        polygons = []
-        centroids = []
+    @property
+    def xs(self) -> List[float]:
+        return self._xs
 
-        for _ in self._y_range:
+    @property
+    def ys(self) -> List[float]:
+        return self._ys
+
+    @property
+    def nx(self) -> int:
+        return self._nx
+
+    @property
+    def ny(self) -> int:
+        return self._ny
+
+    @property
+    def cells(self) -> List[HashCell]:
+        return self._cells
+
+    @property
+    def vertices(self) -> List[HashVertex]:
+        return self._vertices
+
+    def polygons(self) -> List[Polygon]:
+        return [cell.polygon for cell in self.cells]
+
+    def ij2k(self, i: int, j: int) -> int:
+        return j * self.ny + i
+
+    def _make_grid(self) -> Tuple[List[HashCell], List[HashVertex]]:
+        cells: List[HashCell] = []
+        vertices: List[HashVertex] = []
+
+        x_left_origin = self.x_min
+        x_right_origin = self.x_min + self.delta
+        y_bottom_origin = self.y_min
+        y_top_origin = self.y_min + self.delta
+
+        for j, _ in zip(range(len(self.ys)), self.ys):
             x_left = x_left_origin
             x_right = x_right_origin
-
-            for _ in self._x_range:
-                polygons.append(Polygon(
+            for i, _ in zip(range(len(self.xs)), self.xs):
+                cell = HashCell(Polygon(
                     [(x_left, y_top_origin),
                      (x_right, y_top_origin),
                      (x_right, y_bottom_origin),
-                     (x_left, y_bottom_origin)]))
-                centroids.append(((x_left + x_right) / 2, (y_bottom_origin + y_top_origin) / 2))
-                x_left += delta
-                x_right += delta
+                     (x_left, y_bottom_origin)]),
+                    i=i, j=j)
+                cells.append(cell)
+                x_left += self.delta
+                x_right += self.delta
+            y_bottom_origin += self.delta
+            y_top_origin += self.delta
 
-            y_bottom_origin += delta
-            y_top_origin += delta
+        for j in range(0, self.ny):
+            for i in range(0, self.nx):
+                k = self.ij2k(i, j)
+                cells[k].left = cells[self.ij2k(i - 1, j)] if 0 <= i - 1 < self.nx else None
+                cells[k].right = cells[self.ij2k(i + 1, j)] if 0 <= i + 1 < self.nx else None
+                cells[k].bottom = cells[self.ij2k(i, j - 1)] if 0 <= j - 1 < self.ny else None
+                cells[k].top = cells[self.ij2k(i, j + 1)] if 0 <= j + 1 < self.ny else None
 
-        return polygons, centroids
+                vertices.append(cells[k].bottom_left_vertex)
 
-    def _make_grid(self) -> List[Tuple[float, float]]:
-        xs: List[float] = list(self._x_range.copy())
-        xs.append(self._x_max)
-        ys: List[float] = list(self._y_range.copy())
-        ys.append(self._y_max)
+                if i == self.nx - 1:
+                    vertices.append(cells[k].bottom_right_vertex)
 
-        grid = [(x, y) for y in ys for x in xs]
+                if j == self.ny - 1 and not i == self.nx - 1:
+                    vertices.append(cells[k].top_left_vertex)
 
-        return grid
+                if j == self.ny - 1 and i == self.nx - 1:
+                    vertices.append(cells[k].top_right_vertex)
 
-    def _closest_point(self, point: Tuple[float, float]) -> Tuple[float, float]:
-        xi, yi = self._closest_indices(point)
-        return self._xs[xi], self._ys[yi]
+        for j in range(0, self.ny):
+            for i in range(0, self.nx):
+                k = self.ij2k(i, j)
 
-    def _closest_indices(self, point: Tuple[float, float]):
-        (x, y) = point
-        x_index = min(int(np.round(max(x - self._x_min, 0) / self._delta)), len(self._x_range))
-        y_index = min(int(np.round(max(y - self._y_min, 0) / self._delta)), len(self._x_range))
-        return x_index, y_index
+                cells[k].bottom_right_vertex.top_left_cell = cells[k]
+                cells[k].bottom_right_vertex.top_right_cell = cells[k].right
+                cells[k].bottom_right_vertex.bottom_left_cell = cells[k].bottom
+                cells[k].bottom_right_vertex.bottom_right_cell = cells[k].right.bottom if cells[
+                                                                                              k].right is not None else None
 
-    def travel(self, ax: Axes, initial: Tuple[float, float], final: Tuple[float, float]):
-        delta = self._delta
-        grid = self._grid
-        goal = self._closest_point(final)
-        xf, yf = self._closest_indices(goal)
-        xi, yi = self._closest_indices(initial)
-        n = self._grid_x_dim
-        pq = PriorityQueue()
+                cells[k].top_right_vertex.bottom_left_cell = cells[k]
+                cells[k].top_right_vertex.bottom_right_cell = cells[k].right
+                cells[k].top_right_vertex.top_left_cell = cells[k].top
+                cells[k].top_right_vertex.top_right_cell = cells[k].right.top if cells[k].right is not None else None
+
+                cells[k].bottom_left_vertex.top_right_cell = cells[k]
+                cells[k].bottom_left_vertex.top_left_cell = cells[k].left
+                cells[k].bottom_left_vertex.bottom_right_cell = cells[k].bottom
+                cells[k].bottom_left_vertex.bottom_left_cell = cells[k].left.bottom if cells[
+                                                                                           k].left is not None else None
+
+                cells[k].top_left_vertex.bottom_right_cell = cells[k]
+                cells[k].top_left_vertex.bottom_left_cell = cells[k].left
+                cells[k].top_left_vertex.top_right_cell = cells[k].top
+                cells[k].top_left_vertex.top_left_cell = cells[k].left.top if cells[k].left is not None else None
+
+        return cells, vertices
+
+    def closest_indices(self, point: Union[Point, HashVertex]) -> Tuple[int, int]:
+        xi = min(int(np.round(max(point.x - self.x_min, 0) / self.delta)), self.nx)
+        yi = min(int(np.round(max(point.y - self.y_min, 0) / self.delta)), self.ny)
+
+        return xi, yi
+
+    def closest_vertex(self, point: Point) -> HashVertex:
+        closest_distance = float('inf')
+        closest_vertex: Optional[HashVertex] = None
+        for vertex in self.vertices:
+            distance = vertex.distance(point)
+            if distance < closest_distance:
+                closest_distance = distance
+                closest_vertex = vertex
+        return closest_vertex
+
+    def closest_point(self, point: Point) -> Point:
+        vertex = self.closest_vertex(point)
+        return Point(vertex.x, vertex.y)
+
+    @staticmethod
+    def cost_orthogonal(ca: HashCell, cb: HashCell):
+        if ca.is_block and cb.is_block:
+            return None
+        elif ca.is_block or cb.is_block:
+            return 1.3
+        return 1.0
+
+    @staticmethod
+    def cost_diagonal(cell: HashCell):
+        if cell.is_block:
+            return None
+        return 1.5
+
+    def get_cost_neighbour_pairs(self, vertex: HashVertex) -> Set[Tuple[float, HashVertex]]:
+        cost_neighbour_pairs: List[Tuple[float, HashVertex]] = []
+
+        # top
+        if vertex.top_left_cell is not None and vertex.top_right_cell is not None:
+            cost = self.cost_orthogonal(vertex.top_left_cell, vertex.top_right_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.top_right_cell.top_left_vertex))
+
+        # right
+        if vertex.top_right_cell is not None and vertex.bottom_right_cell is not None:
+            cost = self.cost_orthogonal(vertex.top_right_cell, vertex.bottom_right_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.top_right_cell.bottom_right_vertex))
+
+        # bottom
+        if vertex.bottom_left_cell is not None and vertex.bottom_right_cell is not None:
+            cost = self.cost_orthogonal(vertex.bottom_left_cell, vertex.bottom_right_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.bottom_right_cell.bottom_left_vertex))
+
+        # left
+        if vertex.top_left_cell is not None and vertex.bottom_left_cell is not None:
+            cost = self.cost_orthogonal(vertex.top_left_cell, vertex.bottom_left_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.top_left_cell.bottom_left_vertex))
+
+        # top-right
+        if vertex.top_right_cell is not None and vertex.top_right_cell.top_right_vertex is not None:
+            cost = self.cost_diagonal(vertex.top_right_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.top_right_cell.top_right_vertex))
+
+        # bottom-right
+        if vertex.bottom_right_cell is not None and vertex.bottom_right_cell.bottom_right_vertex is not None:
+            cost = self.cost_diagonal(vertex.bottom_right_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.bottom_right_cell.bottom_right_vertex))
+
+        # bottom-left
+        if vertex.bottom_left_cell is not None and vertex.bottom_left_cell.bottom_left_vertex is not None:
+            cost = self.cost_diagonal(vertex.bottom_left_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.bottom_left_cell.bottom_left_vertex))
+
+        # top-left
+        if vertex.top_left_cell is not None and vertex.top_left_cell.top_left_vertex is not None:
+            cost = self.cost_diagonal(vertex.top_left_cell)
+            if cost is not None:
+                cost_neighbour_pairs.append((cost, vertex.top_left_cell.top_left_vertex))
+
+        return set(cost_neighbour_pairs)
+
+    def h(self, vn: HashVertex, vf: HashVertex) -> float:
+        xn, yn = vn.i, vn.j
+        xf, yf = vf.i, vf.j
+        delta_x = abs(xf - xn)
+        delta_y = abs(yf - yn)
+        delta_min = min(delta_x, delta_y)
+        delta_max = max(delta_x, delta_y)
+        delta_diagonal = delta_min
+        delta_orthogonal = delta_max - delta_diagonal
+        return delta_orthogonal * 1.0 + delta_diagonal * 1.5
+
+    def search(self, ax: Axes, start: Point, end: Point, output: tkinter.Text) -> float:
+        output.delete('1.0', tkinter.END)
+        pq: VertexSearchQueue[Tuple[float, HashVertex]] = VertexSearchQueue()
         is_goal_reached: bool = False
-        came_from_set = []
-        came_from_cost_point_set = []
-        cameFrom = {}
+        vi = self.closest_vertex(start)
+        vf = self.closest_vertex(end)
+        visited: Set[HashVertex] = set()
+        path: List[HashVertex] = []
+        cost_path: float = float('Inf')
+        cost_table = []
 
-        def i1d2(p_index):
-            (x_index, y_index) = p_index
-            return y_index * int(np.sqrt(len(self._polygon_intensities))) + x_index
-
-        def i1d(x_index, y_index):
-            return y_index * n + x_index
-
-        def g(p_index: Tuple[int, int], neighbour_index: Tuple[int, int]) -> float:
-            (x_index, y_index) = p_index
-            (x_index_neighbour, y_index_neighbour) = neighbour_index
-            return 0.0
-
-        def h(x_index, y_index) -> float:
-            (px, py) = grid[i1d(x_index, y_index)]
-            (gx, gy) = goal
-            return (((gx - px) ** 2) + ((gy - py) ** 2)) ** 0.5
-
-        def get_cost(p_index: Tuple[int, int], neighbour_index: Tuple[int, int]) -> float:
-            (x_index, y_index) = p_index
-            return g(p_index, neighbour_index) + h(x_index, y_index)
-
-        def is_in_range2(p_index) -> bool:
-            (x_index, y_index) = p_index
-            return is_in_range(x_index, y_index)
-
-        def is_in_range(x_index, y_index) -> bool:
-            return 0 <= x_index < n and 0 <= y_index < n
-
-        def get_neighbours(x_index, y_index):
-            indices = [
-                (x_index, y_index + 1),      # up
-                (x_index + 1, y_index + 1),  # up-right
-                (x_index + 1, y_index),      # right
-                (x_index + 1, y_index - 1),  # down-right
-                (x_index, y_index - 1),      # down
-                (x_index - 1, y_index - 1),  # down-left
-                (x_index - 1, y_index),      # left
-                (x_index - 1, y_index + 1)   # up-left
-            ]
-
-            polygon_indices = [
-                (x_index, y_index),          # up-right
-                (x_index, y_index - 1),      # down-right
-                (x_index - 1, y_index - 1),  # down-left
-                (x_index - 1, y_index)       # up-left
-            ]
-
-            def get_cost_non_diagonal(is_block_1, is_block_2):
-                if is_block_1 and is_block_2:
-                    return None
-                if is_block_1:
-                    return 1.3
-                return 1.0
-
-            cost_index_pairs = []
-
-            def is_polygon_in_range(polygon_index):
-                x_polygon_index, y_polygon_index = polygon_index
-                n_polygon = int(np.sqrt(len(self._polygon_intensities)))
-                return 0 <= x_polygon_index < n_polygon and 0 <= y_polygon_index < n_polygon
-
-            if is_in_range2(indices[0]) and is_polygon_in_range(polygon_indices[0]) and is_polygon_in_range(polygon_indices[3]):
-                is_block_right = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
-                is_block_left = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
-                cost_non_diagonal = get_cost_non_diagonal(is_block_right, is_block_left)
-                if cost_non_diagonal is not None:
-                    cost_index_pairs.append((cost_non_diagonal, indices[0]))
-
-            if is_in_range2(indices[1]) and is_polygon_in_range(polygon_indices[0]):
-                is_block = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
-                if not is_block:
-                    cost_index_pairs.append((1.5, indices[1]))
-
-            if is_in_range2(indices[2]) and is_polygon_in_range(polygon_indices[0]) and is_polygon_in_range(polygon_indices[1]):
-                is_block_up = self._polygon_intensities[i1d2(polygon_indices[0])].is_block
-                is_block_down = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
-                cost_non_diagonal = get_cost_non_diagonal(is_block_up, is_block_down)
-                if cost_non_diagonal is not None:
-                    cost_index_pairs.append((cost_non_diagonal, indices[2]))
-
-            if is_in_range2(indices[3]) and is_polygon_in_range(polygon_indices[1]):
-                is_block = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
-                if not is_block:
-                    cost_index_pairs.append((1.5, indices[3]))
-
-            if is_in_range2(indices[4]) and is_polygon_in_range(polygon_indices[1]) and is_polygon_in_range(polygon_indices[2]):
-                is_block_right = self._polygon_intensities[i1d2(polygon_indices[1])].is_block
-                is_block_left = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
-                cost_non_diagonal = get_cost_non_diagonal(is_block_right, is_block_left)
-                if cost_non_diagonal is not None:
-                    cost_index_pairs.append((cost_non_diagonal, indices[4]))
-
-            if is_in_range2(indices[5]) and is_polygon_in_range(polygon_indices[2]):
-                is_block = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
-                if not is_block:
-                    cost_index_pairs.append((1.5, indices[5]))
-
-            if is_in_range2(indices[6]) and is_polygon_in_range(polygon_indices[3]) and is_polygon_in_range(polygon_indices[2]):
-                is_block_up = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
-                is_block_down = self._polygon_intensities[i1d2(polygon_indices[2])].is_block
-                cost_non_diagonal = get_cost_non_diagonal(is_block_up, is_block_down)
-                if cost_non_diagonal is not None:
-                    cost_index_pairs.append((cost_non_diagonal, indices[6]))
-
-            if is_in_range2(indices[7]) and is_polygon_in_range(polygon_indices[3]):
-                is_block = self._polygon_intensities[i1d2(polygon_indices[3])].is_block
-                if not is_block:
-                    cost_index_pairs.append((1.5, indices[7]))
-
-            return cost_index_pairs
-
-        def draw_markers():
-            ax.plot([xi], [yi], color='black')
-            plt.draw()  # re-draw the figure
-            plt.pause(0.000000000001)
-            ax.plot([xf], [yf], color='black')
-            plt.draw()  # re-draw the figure
-            plt.pause(0.000000000001)
-
-        def draw_lines(point: Tuple[int, int], points: List[Tuple[int, int]], color=None):
-            xs = self._xs
-            ys = self._ys
-            (xi1, yi1) = point
-
-            lines = [([xs[xi1], xs[xi2]], [ys[yi1], ys[yi2]]) for xi2, yi2 in points]
-
-            for line in lines:
-                x_values, y_values = line
-                ax.plot(x_values, y_values, color=color if color is not None else 'white')
-                # fig: Figure = ax.get_figure()
-                # plt.draw()  # re-draw the figure
-                # plt.pause(0.000000000001)
-
-        # draw_markers()
-        pq.put((100000000.0, (xi, yi)))
-
-        closed_set = []
-
-        path = []
+        vi.cost_h = self.h(vi, vf)
+        output.insert(tkinter.END, '\n' + f'initial_h: {vi.cost_h}')
+        output.insert(tkinter.END, '\n' + f'initial: {vi.i},{vi.j} ({vi.x},{vi.y})')
+        output.insert(tkinter.END, '\n' + f'final: {vf.i},{vf.j} ({vf.x},{vf.y})')
+        pq.put((vi.cost_h, vi))
 
         while not pq.empty():
-            cost, pi = pq.get()
-            (xi, yi) = pi
+            v: HashVertex
+            cost_f, v = pq.get()
 
-            if pi == (xf, yf):
+            if v == vf:
+                cost_path = v.cost_g
                 is_goal_reached = True
-                path = [pi]
-                while pi in cameFrom:
-                    pi = cameFrom[pi]
-                    path.append(pi)
+                path.append(v)
+
+                while v.previous is not None:
+                    path.append(v.previous)
+                    if v == vi:
+                        break
+                    v = v.previous
+
                 path.reverse()
                 break
 
-            closed_set.append(pi)
+            visited.add(v)
 
-            cips = get_neighbours(xi, yi)
-            pis = [pi for (c, pi) in cips]
-            draw_lines((xi, yi), pis)
+            cost_neighbour_pairs = self.get_cost_neighbour_pairs(v)
+            self.draw_path_attempt(ax=ax, vertex=v)
 
-            for (g_cost_neighbour, neighbour) in cips:
-                (x_neighbour, y_neighbour) = neighbour
-                cost_neighbour = g_cost_neighbour + 0 * h(x_neighbour, y_neighbour)
+            for cost_neighbour_pair in cost_neighbour_pairs:
+                (g, vn) = cost_neighbour_pair
+                cost_h = self.h(vn, vf)
+                cost_g = v.cost_g + g
 
-                if cost_neighbour < cost and pi not in came_from_set:
-                    came_from_set.append(pi)
-                    came_from_cost_point_set.append((cost, pi))
+                queue_vertices = pq.vertices()
 
-                if cost_neighbour < cost:
-                    cameFrom[neighbour] = pi
+                if vn not in visited and vn not in queue_vertices:
+                    vn.previous = v
+                    vn.cost_g = cost_g
+                    vn.cost_h = cost_h
 
-                # if neighbour not in closed_set \
-                #         and neighbour not in [p for (c, p) in pq.queue] \
-                #         and cost_neighbour < cost:
-                #     cameFrom[neighbour] = pi
+                    pq.put((vn.cost_f, vn))
+                elif vn in queue_vertices:
+                    (cost_fn_same, vn_same) = pq.find(vn)
 
-                if neighbour not in closed_set and neighbour not in [p for (c, p) in pq.queue]:
-                    pq.put((cost_neighbour, neighbour))
-                    # pq.put((cost + cost_neighbour, neighbour))
-                    # if cost_neighbour < cost and pi not in came_from_set:
-                    #     came_from_set.append(pi)
-                    #     came_from_cost_point_set.append((cost, pi))
-                elif neighbour in [p for (c, p) in pq.queue]:
-                    queue = [p for (c, p) in pq.queue]
-                    same_neighbour_index = queue.index(neighbour)
-                    (same_neighbour_cost, same_neighbour) = pq.queue[same_neighbour_index]
-                    # if cost_neighbour < cost and pi not in came_from_set:
-                    #     came_from_set.append(pi)
-                    #     came_from_cost_point_set.append((cost, pi))
+                    if cost_fn_same > cost_g + cost_h:
+                        vn.previous = v
 
-                    if same_neighbour_cost > cost_neighbour:
-                    # if same_neighbour_cost > cost + cost_neighbour:
-                        if same_neighbour in came_from_set:
-                            print('here')
+                        vn.cost_g = cost_g
+                        vn.cost_h = cost_h
 
-                        new_pq = PriorityQueue()
-                        for (c, p) in pq.queue:
-                            if not p == neighbour:
-                                new_pq.put((c, p))
-                        new_pq.put((cost_neighbour, neighbour))
-                        # new_pq.put((cost + cost_neighbour, neighbour))
-                        pq = new_pq
+                        pq = pq.replace(to_remove=vn, to_put=(vn.cost_f, vn))
 
-        print('is_goal_reached: ' + str(is_goal_reached))
+        output.insert(tkinter.END, '\n' + 'is_goal_reached: ' + str(is_goal_reached))
 
         if is_goal_reached:
-            for i in np.arange(1, len(path), 1):
-                draw_lines(path[i - 1], [path[i]], color='black')
+            path = path[path.index(vi):]
+            for i in range(1, len(path)):
+                self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='red', linewidth=2)
+                step_cost = path[i].cost_g - path[i - 1].cost_g
+                h_prime = path[i].cost_h
+                h = path[i - 1].cost_h
+                step_cost_plus_h_prime = step_cost + h_prime
+                h_star = cost_path - path[i - 1].cost_g
+                h_str = '{:.2f}'.format(h)
+                h_star_str = '{:.2f}'.format(h_star)
+                step_cost_plus_h_prime_str = '{:.2f}'.format(step_cost_plus_h_prime)
+                cost_table.append(
+                    f'h*(n)={h_star_str}, h(n)={h_str}, h(n)<=h*(n): {h <= h_star}, c(n,n\')+h(n\')={step_cost_plus_h_prime_str}, c(n,n\')+h(n\')>=h(n): {step_cost_plus_h_prime >= h}')
 
-        if is_goal_reached:
-            for i in np.arange(1, len(came_from_set), 1):
-                draw_lines(came_from_set[i - 1], [came_from_set[i]], color='black')
+        for cost_element in cost_table:
+            output.insert(tkinter.END, '\n' + cost_element)
 
-        pass
+        output.see(tkinter.END)
+        return cost_path
 
-    def compute_statistics(self):
-        start: float = time()
-        vertices: List[Tuple[float, float]] = []
-        coord_intensities: List[CoordIntensityPair] = []
+    @staticmethod
+    def draw_path_attempt(ax: Axes, vertex: HashVertex, color='white', linewidth=0.5):
+        if vertex.previous is not None:
+            ax.plot([vertex.previous.x, vertex.x], [vertex.previous.y, vertex.y], color=color, linewidth=linewidth)
 
-        points = self._points
-        delta = self._delta
-        x_min = self._x_min
-        y_min = self._y_min
-        x_range = self._x_range.copy()
-        y_range = self._y_range.copy()
-        threshold = self._threshold_percent
+    @staticmethod
+    def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None, linewidth=0.1):
+        lines = [([to_vertex.x, from_vertex.x], [to_vertex.y, from_vertex.y]) for to_vertex in to_vertices]
 
-        for y in y_range:
-            for x in x_range:
-                vertices.append((x, y))
+        for line in lines:
+            xs, ys = line
+            ax.plot(xs, ys, color=color if color is not None else 'white', linewidth=linewidth)
 
-        for vertex in vertices:
-            coord_intensities.append(CoordIntensityPair(vertex))
 
-        for point in points:
-            x_index = min(int(np.floor((point.x - x_min) / delta)), len(self._x_range) - 1)
-            y_index = min(int(np.floor((point.y - y_min) / delta)), len(self._y_range) - 1)
-            coord_intensities[min(y_index * len(self._y_range) + x_index, len(vertices) - 1)].intensity += 1
+class CrimeMap:
+    _shape_file: str
+    _delta: float
+    _threshold_percent: float
+    _threshold_index: int
+    _threshold_value: int
+    _geo_data_frame: GeoDataFrame
+    _points: List[Point]
+    _graph: Graph
 
-        values = [ci.intensity for ci in coord_intensities]
-        polygons = self._polygons
+    def __init__(self, shape_file: str, delta: float, threshold_percent: float):
+        self._shape_file = shape_file
+        self._delta = delta
+        self._threshold_percent = threshold_percent
+        self._geo_data_frame = gp.read_file(shape_file)
+        self._points = [v[3] for v in self._geo_data_frame.values]
+        bounds = self._geo_data_frame.total_bounds
+        self._graph = Graph(bounds=(bounds[0], bounds[1], bounds[2], bounds[3]), delta=delta)
+        self._set_values_to_cells()
+        self._threshold_index, self._threshold_value = self._compute_thresholds_and_set_is_block_to_cells()
 
-        pips: List[PolygonIntensityPair] = []
+    @property
+    def delta(self) -> float:
+        return self._delta
 
-        for i in np.arange(0, len(polygons), 1):
-            pips.append(PolygonIntensityPair.make(polygons[i], values[i], i))
+    @property
+    def threshold(self) -> float:
+        return self._threshold_percent
 
-        sorted_pips = sorted(pips, key=lambda pip: pip.intensity, reverse=True)
-        sorted_values = [pip.intensity for pip in sorted_pips]
-        sorted_polygons = [pip.polygon for pip in sorted_pips]
+    @property
+    def points(self) -> List[Point]:
+        return self._points
 
-        inflection_index = int(len(sorted_polygons) * threshold / 100)
-        yellow_colors = ['yellow'] * (len(sorted_polygons) - inflection_index)
-        purple_colors = ['purple'] * (len(sorted_polygons) - len(yellow_colors))
-        colors = yellow_colors + purple_colors
-        norm_values = [1 if v == 'yellow' else 0 for v in colors]
-        print(sorted_values)
-        print(norm_values)
-        print('inflection_index: ' + str(inflection_index))
+    @property
+    def graph(self):
+        return self._graph
 
-        for i in np.arange(0, len(colors), 1):
-            if colors[i] == 'yellow':
-                sorted_pips[i].is_block = True
+    @property
+    def threshold_index(self):
+        return self._threshold_index
 
-        v_min = min(values)
-        v_max = max(values)
-        median = threshold / 100 * (v_max - v_min) + v_min
-        sum_values = sum(values)
-        std_dev = np.std(values)
-        avg = np.average(values)
-        print('vmin: ' + str(v_min))
-        print('vmax: ' + str(v_max))
-        print('median: ' + str(median))
-        print('sum_values: ' + str(sum_values))
-        print('std_dev: ' + str(std_dev))
-        print('avg: ' + str(avg))
+    @property
+    def threshold_value(self):
+        return self._threshold_value
 
-        end: float = time()
-        plot_data_time = end - start
+    def _set_values_to_cells(self):
+        for point in self.points:
+            xi = min(int(np.floor((point.x - self.graph.x_min) / self.delta)), self.graph.nx - 1)
+            yi = min(int(np.floor((point.y - self.graph.y_min) / self.delta)), self.graph.ny - 1)
+            self.graph.cells[self.graph.ij2k(xi, yi)].value += 1
 
-        print('plot_data_time: ' + str(plot_data_time))
+    def _compute_thresholds_and_set_is_block_to_cells(self):
+        cells_reverse_sorted: List[HashCell] = sorted(self.graph.cells, key=lambda c: c.value, reverse=True)
+        threshold_index: int = int(len(cells_reverse_sorted) * (100 - self.threshold) / 100)
+        threshold_value: int = 0
 
-        return dict(
-            vertices=vertices,
-            coord_intensities=coord_intensities,
-            polygon_intensities=sorted(sorted_pips, key=lambda pip: pip.order),
+        for cell in self.graph.cells:
+            if self.threshold == 100 or threshold_index == 0:
+                threshold_value = max([cell.value for cell in self.graph.cells]) + 1
+                cell.is_block = False
+            elif self.threshold == 0 or threshold_index == len(cells_reverse_sorted) - 1:
+                threshold_value = min([cell.value for cell in self.graph.cells])
+                cell.is_block = True
+            else:
+                threshold_value = cells_reverse_sorted[0:threshold_index][-1].value
+                cell.is_block = cell.value >= threshold_value
 
-            values=values,
+            cell.norm_value = 1 if cell.is_block else 0
 
-            sorted_polygon_intensities=sorted_pips,
-            sorted_polygons=sorted_polygons,
-            sorted_centroids=[polygon.centroid for polygon in sorted_polygons],
-            sorted_values=sorted_values,
+        return threshold_index, threshold_value
 
-            inflection_index=inflection_index,
-            colors=colors,
-            sorted_norm_values=norm_values,
+    def plot(self, ax: Axes) -> Axes:
+        cmap = plt.cm.jet
+        cmaplist = ['grey', 'black']
+        cmap = matplotlib.colors.LinearSegmentedColormap.from_list('Custom cmap', cmaplist, cmap.N)
 
-            n_high=len(yellow_colors),
-            v_min=v_min,
-            v_max=v_max,
-            median=median,
-            sum_values=sum_values,
-            std_dev=std_dev,
-            avg=avg,
-            plot_data_time=plot_data_time
-        )
+        gdf = gp.GeoDataFrame({'values': [cell.norm_value for cell in self.graph.cells],
+                               'colors': ['black' if cell.is_block else 'white' for cell in self.graph.cells]},
+                              geometry=[cell.polygon for cell in self.graph.cells])
 
-    def plot(self) -> Axes:
-        gdf = gp.GeoDataFrame({'values': self._sorted_norm_values, 'colors': self._colors},
-                              geometry=self._sorted_polygons)
+        ax: Axes = gdf.plot(column='values', cmap=cmap, ax=ax)
 
-        ax: Axes = gdf.plot(column='values', cmap='viridis') if self._threshold_percent != 0 else gdf.plot(
-            color='yellow')
+        for cell in self.graph.cells:
+            ax.text(cell.centroid.x, cell.centroid.y, str(cell.value),
+                    fontdict=dict(color='white' if cell.is_block else 'black', fontsize=3, ha='center', va='center'))
 
-        for i in np.arange(0, len(self._sorted_centroids), 1):
-            centroid = self._sorted_centroids[i].xy
-            x = centroid[0][0]
-            y = centroid[1][0]
-            val = self._sorted_values[i]
-            color = 'white' if self._colors[i] == 'purple' else 'black'
-            plt.text(x, y, str(val), fontdict=dict(color=color, fontsize=3, ha='center', va='center'))
-
-        xs = list(self._x_range)
-        xs.append(self._x_max)
-        ys = list(self._y_range)
-        ys.append(self._y_max)
-
-        x_ticks = [x for (x, i) in zip(xs, np.arange(0, len(xs), 1)) if i % 2 == 0]
-        y_ticks = [y for (y, i) in zip(ys, np.arange(0, len(ys), 1)) if i % 2 == 0]
+        x_ticks = [x for (x, i) in zip(self.graph.xs, np.arange(0, self.graph.nx, 1)) if i % 2 == 0]
+        y_ticks = [y for (y, i) in zip(self.graph.ys, np.arange(0, self.graph.ny, 1)) if i % 2 == 0]
 
         ax.set_xticks(x_ticks)
-        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=4))
+        ax.set_xticklabels(['{:.3f}'.format(x_tick) for x_tick in x_ticks], fontdict=dict(fontsize=3))
         ax.set_yticks(y_ticks)
-        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=4))
+        ax.set_yticklabels(['{:.3f}'.format(y_tick) for y_tick in y_ticks], fontdict=dict(fontsize=3))
         ax.set_title(
-            'n_high={n_high}, std_dev={std_dev}, avg={avg}, delta={delta}, threshold={threshold}%'.format(
-                std_dev='{:.2f}'.format(self._v_std_dev),
-                avg='{:.2f}'.format(self._v_avg),
-                delta='{:.3f}'.format(self._delta),
-                threshold=str(self._threshold_percent),
-                n_high=self._n_high
+            'τ={threshold_value} ({threshold}%), σ={std_dev}, μ={avg}, '
+            'δ={delta}'.format(
+                std_dev='{:.2f}'.format(np.std([cell.value for cell in self.graph.cells])),
+                avg='{:.2f}'.format(np.average([cell.value for cell in self.graph.cells])),
+                delta='{:.3f}'.format(self.delta),
+                threshold=str(self.threshold),
+                threshold_value=self.threshold_value
             ),
             pad=10,
-            fontdict=dict(fontsize=8))
-
-        plt.draw()
-        # self._geo_data_frame.plot(ax=ax)
+            fontdict=dict(fontsize=6))
 
         return ax
 
-        # root = tkinter.Tk()
-        # fig = plt.Figure()
-        # canvas = FigureCanvasTkAgg(fig, root)
-        # canvas.get_tk_widget().pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
-        # ax_gui: Axes = fig.add_subplot(111)
-        #
-        # fig.subplots_adjust(bottom=0.25)
-        # y_values = [random.randrange(20, 40, 1) for _ in range(40)]
-        # x_values = [i for i in range(40)]
-        #
-        # # ax.axis([0, 9, 20, 40])
-        # # ax.plot(x_values, y_values)
-        # gdf.plot(column='values', cmap='viridis', ax=ax_gui) if self._threshold_percent != 0 else gdf.plot(
-        #     color='yellow', ax=ax_gui)
-        #
-        # for i in np.arange(0, len(self._sorted_centroids), 1):
-        #     centroid = self._sorted_centroids[i].xy
-        #     x = centroid[0][0]
-        #     y = centroid[1][0]
-        #     val = self._sorted_values[i]
-        #     color = 'white' if self._colors[i] == 'purple' else 'black'
-        #
-        #     ax_gui.text(x, y, str(val), fontdict=dict(color=color, fontsize=3, ha='center', va='center'))
-        #
-        # ax_threshold = fig.add_axes([(0.25+0.25/2), 0.1, 0.25, 0.03])
-        # s_threshold = Slider(ax_threshold, 'Threshold (%)', 0, 100, valinit=50, valstep=1)
-        #
-        # def update(threshold):
-        #     ax_gui.set_title('std_dev = {std_dev}, avg = {avg} ({aperture}, {threshold}%)'.format(
-        #         std_dev='{:.2f}'.format(self._v_std_dev),
-        #         avg='{:.2f}'.format(self._v_avg), aperture='{:.3f}'.format(self._delta),
-        #         threshold='{:.2f}'.format(threshold)))
-        #     fig.canvas.draw_idle()
-        #
-        # s_threshold.on_changed(update)
-        #
-        # tkinter.mainloop()
 
+class Main:
+    fig: Figure
+    fig_controls: Figure
+    ax: Axes
+    ax_controls: Axes
+    crime_map: CrimeMap
+    start: Optional[Point]
+    goal: Optional[Point]
+    _path_handles: List[Line2D]
+    _should_set_start_next: bool
+    _delta: float
+    _threshold_percent: float
 
-def main():
-    plt.ion()
-    start_time = time()
-    crime_map = CrimeMap('./Shape/crime_dt.shp', 0.002, 65)
-    ax = crime_map.plot()
-    # crime_map.travel(ax=ax, initial=(-73.586, 45.510), final=(-73.552, 45.494))
-    # crime_map.travel(ax=ax, initial=(-73.566, 45.528), final=(-73.552, 45.494))
-    # crime_map.travel(ax=ax, initial=(-73.588, 45.494), final=(-73.554, 45.526))
-    crime_map.travel(ax=ax, initial=(-73.588, 45.494), final=(-73.555, 45.514))
-    end_time = time()
-    exec_time = end_time - start_time
-    print('exec_time: ' + str(exec_time))
+    def __init__(self):
+        self.root = tkinter.Tk()
+        self.start = None
+        self.goal = None
+        self._should_set_start_next = True
+        self._delta = 0.002
+        self._threshold_percent = 50
 
-    plt.ioff()
-    plt.show()
+    def run(self):
+        self.fig = plt.figure(figsize=(5, 3))
+        self.ax = plt.subplot2grid((1, 10), (0, 0), colspan=6, fig=self.fig)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, self.root)
+        self._draw_map()
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
+
+        self.canvas.mpl_connect('button_press_event', self._onclick)
+
+        self.sv1 = tkinter.StringVar(value='0.002')
+        self.sv2 = tkinter.StringVar(value='50')
+        self.sv3 = tkinter.StringVar(value='Starting..')
+
+        l1 = tkinter.Label(self.root, text='Width:', width=8)
+        l1.pack(side=tkinter.LEFT)
+        e1 = tkinter.Entry(self.root, textvariable=self.sv1, width=10)
+        e1.pack(side=tkinter.LEFT)
+        self.e1 = e1
+
+        l2 = tkinter.Label(self.root, text='Threshold%:', width=12)
+        l2.pack(side=tkinter.LEFT, padx=10)
+        e2 = tkinter.Entry(self.root, textvariable=self.sv2, width=5)
+        e2.pack(side=tkinter.LEFT)
+        self.e2 = e2
+
+        e1.bind('<Return>', self._onsubmit_delta)
+        e2.bind('<Return>', self._onsubmit_threshold_percent)
+
+        txt = tkinter.Text(self.root, width=100, height=65)
+        txt.place(relx=0.60, rely=0.12)
+        txt.insert(tkinter.END, 'Starting...')
+        self.txt = txt
+
+        self.root.mainloop()
+
+    def _draw_map(self):
+        self.crime_map = CrimeMap(shape_file="./Shape/crime_dt.shp",
+                                  delta=self._delta,
+                                  threshold_percent=self._threshold_percent)
+        self.crime_map.plot(self.ax)
+        self.fig.canvas.draw()
+
+    def _draw_marker(self, point: Point, is_start: bool):
+        self.ax.plot([point.x], [point.y],
+                     marker='o' if is_start else '*',
+                     color='green' if is_start else 'yellow', zorder=10)
+        self.fig.canvas.draw()
+
+    def _onclick(self, event):
+        x, y = event.xdata, event.ydata
+
+        if x is not None and y is not None and event.inaxes in [self.ax]:
+            if self._should_set_start_next:
+                self.ax.lines.clear()
+                self.start = self.crime_map.graph.closest_point(Point(x, y))
+                self._should_set_start_next = False
+                self._draw_marker(self.start, True)
+            else:
+                self.goal = self.crime_map.graph.closest_point(Point(x, y))
+                self._draw_marker(self.goal, False)
+
+                self._should_set_start_next = True
+                s_time = time()
+                cost_path = self.crime_map.graph.search(ax=self.ax, start=self.start, end=self.goal, output=self.txt)
+                e_time = time()
+                t_time = '{:.2f}'.format(e_time - s_time)
+                cost_path_str = '{:.2f}'.format(cost_path)
+                self.txt.insert(tkinter.END, '\n' + f'path_cost: {cost_path_str}')
+                self.txt.insert(tkinter.END, '\n' + f'exec_time: {t_time} secs')
+                self.fig.canvas.draw()
+
+    def _onsubmit_delta(self, event):
+        self._delta = float(self.sv1.get())
+        self.ax.clear()
+        self._draw_map()
+
+    def _onsubmit_threshold_percent(self, event):
+        self._threshold_percent = float(self.sv2.get())
+        self.ax.clear()
+        self._draw_map()
+
+    def _ontextchange(self, event):
+        self.tb_delta.text_disp.set_fontsize(6)
+        self.tb_threshold.text_disp.set_fontsize(6)
+
+    def _init_text_boxes(self):
+        matplotlib.rcParams.update({'font.size': 6})
+
+        ax_delta = self.fig.add_axes([0.8, 0.5, 0.1, 0.05])
+        self.tb_delta = TextBox(ax_delta, 'Width', initial=str(self._delta))
+        self.tb_delta.on_submit(self._onsubmit_delta)
+
+        ax_threshold = self.fig.add_axes([0.8, 0.4, 0.1, 0.05])
+        self.tb_threshold = TextBox(ax_threshold, 'Threshold%', initial=str(self._threshold_percent))
+        self.tb_threshold.on_submit(self._onsubmit_threshold_percent)
 
 
 if __name__ == '__main__':
-    main()
+    Main().run()
