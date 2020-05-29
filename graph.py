@@ -1,9 +1,14 @@
+import tkinter
 from queue import PriorityQueue
 from time import time
-from typing import Tuple, Optional, List, Set, Any
+from typing import Tuple, Optional, List, Set, Any, Union
 
 from geopandas import GeoDataFrame
 from matplotlib.axes import Axes
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.widgets import TextBox
 from shapely.geometry import Polygon, Point
 import numpy as np
 import geopandas as gp
@@ -26,6 +31,9 @@ class HashVertex:
     _bottom_right_cell: Optional['HashCell']
     _top_left_cell: Optional['HashCell']
     _top_right_cell: Optional['HashCell']
+    _cost_g: float
+    _cost_h: float
+    _cost_f: float
 
     def __init__(self, x: float, y: float):
         self._x = x
@@ -47,7 +55,9 @@ class HashVertex:
         self.bottom_left: Optional['HashVertex'] = None
         self.left: Optional['HashVertex'] = None
         self.top_left: Optional['HashVertex'] = None
-        self.cost_ancestor_pairs: List[Tuple[float, 'HashVertex']] = []
+        self._cost_g: float = 0.0
+        self._cost_h: float = 0.0
+        self._cost_f: float = 0.0
 
     @property
     def x(self) -> float:
@@ -112,6 +122,26 @@ class HashVertex:
     @property
     def cells(self) -> List['HashCell']:
         return self._cells
+
+    @property
+    def cost_g(self) -> float:
+        return self._cost_g
+
+    @cost_g.setter
+    def cost_g(self, cost_g: float):
+        self._cost_g = cost_g
+
+    @property
+    def cost_h(self) -> float:
+        return self._cost_h
+
+    @cost_h.setter
+    def cost_h(self, cost_h: float):
+        self._cost_h = cost_h
+
+    @property
+    def cost_f(self) -> float:
+        return self.cost_g + self.cost_h
 
     def distance(self, vertex: 'HashVertex'):
         return (((self.x - vertex.x) ** 2) + ((self.y - vertex.y) ** 2)) ** 0.5
@@ -431,11 +461,9 @@ class Graph:
                 cells[k].top_left_vertex.top_right_cell = cells[k].top
                 cells[k].top_left_vertex.top_left_cell = cells[k].left.top if cells[k].left is not None else None
 
-                # print('hey')
-
         return cells, vertices
 
-    def closest_indices(self, point: Point) -> Tuple[int, int]:
+    def closest_indices(self, point: Union[Point, HashVertex]) -> Tuple[int, int]:
         xi = min(int(np.round(max(point.x - self.x_min, 0) / self.delta)), self.nx)
         yi = min(int(np.round(max(point.y - self.y_min, 0) / self.delta)), self.ny)
         return xi, yi
@@ -449,6 +477,10 @@ class Graph:
                 closest_distance = distance
                 closest_vertex = vertex
         return closest_vertex
+
+    def closest_point(self, point: Point) -> Point:
+        vertex = self.closest_vertex(point)
+        return Point(vertex.x, vertex.y)
 
     @staticmethod
     def cost_orthogonal(ca: HashCell, cb: HashCell):
@@ -517,39 +549,48 @@ class Graph:
 
         return set(cost_neighbour_pairs)
 
-    def h(self, a: HashVertex, b: HashVertex):
-        return a.distance(b)
+    def h(self, vn: HashVertex, vf: HashVertex) -> float:
+        xn, yn = self.closest_indices(vn)
+        xf, yf = self.closest_indices(vf)
+        delta_x = abs(xf - xn)
+        delta_y = abs(yf - yn)
+        delta_min = min(delta_x, delta_y)
+        delta_max = max(delta_x, delta_y)
+        delta_diagonal = delta_min
+        delta_orthogonal = delta_max - delta_diagonal
+        return delta_orthogonal * 1.0 + delta_diagonal * 1.5
 
-    @staticmethod
-    def scale() -> float:
-        return 1
-
-    def search(self, ax: Axes, start: Point, end: Point):
+    def search(self, ax: Axes, start: Point, end: Point) -> float:
         pq: VertexSearchQueue[Tuple[float, HashVertex]] = VertexSearchQueue()
         is_goal_reached: bool = False
         vi = self.closest_vertex(start)
         vf = self.closest_vertex(end)
         visited: Set[HashVertex] = set()
         path: List[HashVertex] = []
-        cost_v: float = 0.0
-        self.draw_markers(ax=ax, start=vi, end=vf)
+        cost_path: float = float('Inf')
+        cost_table = []
 
         pq.put((0, vi))
 
         while not pq.empty():
             v: HashVertex
-            cost_v, v = pq.get()
+            cost_f, v = pq.get()
 
             if v == vf:
+                cost_path = v.cost_g
                 is_goal_reached = True
                 path.append(v)
-                # while not len(v.cost_ancestor_pairs) == 0:
-                #     vas = [vertex for (_, vertex) in v.cost_ancestor_pairs]
-                #     cas = [cost for (cost, _) in v.cost_ancestor_pairs]
-                #     v = vas[cas.index(min(cas))]
-                #     path.append(v)
 
                 while v.previous is not None:
+                    step_cost = v.cost_g - v.previous.cost_g
+                    h_prime = v.cost_h
+                    h = v.previous.cost_h
+                    step_cost_plus_h_prime = step_cost + h_prime
+                    h_star = cost_path - v.previous.cost_g
+                    h_str = '{:.2f}'.format(h)
+                    h_star_str = '{:.2f}'.format(h_star)
+                    step_cost_plus_h_prime_str = '{:.2f}'.format(step_cost_plus_h_prime)
+                    cost_table.append(f'h*(n)={h_star_str}, h(n)={h_str}, h(n)<=h*(n): {h <= h_star}, c(n,n\')+h(n\')={step_cost_plus_h_prime_str}, c(n,n\')+h(n\')>=h(n): {step_cost_plus_h_prime >= h}')
                     path.append(v.previous)
                     v = v.previous
 
@@ -559,43 +600,50 @@ class Graph:
             visited.add(v)
 
             cost_neighbour_pairs = self.get_cost_neighbour_pairs(v)
-            self.draw_lines(ax=ax, from_vertex=v, to_vertices=[neighbour for (_, neighbour) in cost_neighbour_pairs])
+            self.draw_path_attempt(ax=ax, vertex=v)
 
             for cost_neighbour_pair in cost_neighbour_pairs:
                 (g, vn) = cost_neighbour_pair
-                #cost_vn = cost_v + g + self.scale() * self.h(v, vf)
-                cost_h = np.floor((self.h(v, vf) / self.delta) - 2.0) * 0.0
-                cost_h = 0 if cost_h < 0 else cost_h
-                cost_vn = (cost_v + g + self.scale() * cost_h)
-                print('cost_vn: ' + str(cost_vn) + '; cost_hv: ' + str(cost_h))
+                cost_h = self.h(vn, vf)
+                cost_g = v.cost_g + g
+
+                print('cost_gn: ' + str(cost_g) + '; cost_hn: ' + str(cost_h) + '; cost_fn: ' + str(cost_g + cost_h))
                 queue_vertices = pq.vertices()
-                # print([_c for (_c, _v) in pq.queue])
 
                 if vn not in visited and vn not in queue_vertices:
                     vn.previous = v
-                    vn.cost_ancestor_pairs.append((cost_v, v))
-                    pq.put((cost_vn, vn))
+                    vn.cost_g = cost_g
+                    vn.cost_h = cost_h
+
+                    pq.put((vn.cost_f, vn))
                 elif vn in queue_vertices:
-                    (cost_vn_same, vn_same) = pq.find(vn)
+                    (cost_fn_same, vn_same) = pq.find(vn)
 
                     # replace lower cost vertex
-                    if cost_vn_same > cost_vn:
+                    if vn_same.cost_g > cost_g:
                         vn.previous = v
-                        vn.cost_ancestor_pairs.append((cost_v, v))
-                        pq = pq.replace(to_remove=vn, to_put=(cost_vn, vn))
+
+                        vn.cost_g = cost_g
+                        vn.cost_h = cost_h
+
+                        pq = pq.replace(to_remove=vn, to_put=(vn.cost_f, vn))
 
         print('is_goal_reached: ' + str(is_goal_reached))
 
         if is_goal_reached:
-            print('path_cost: ' + str(cost_v))
-
             for i in range(1, len(path)):
                 self.draw_lines(ax=ax, from_vertex=path[i - 1], to_vertices=[path[i]], color='red', linewidth=2)
 
+        cost_table.reverse()
+        for cost_element in cost_table:
+            print(cost_element)
+
+        return cost_path
+
     @staticmethod
-    def draw_markers(ax: Axes, start: HashVertex, end: HashVertex):
-        ax.scatter([start.x], [start.y], marker='o', zorder=10)
-        ax.scatter([end.x], [end.y], marker='*', zorder=10)
+    def draw_path_attempt(ax: Axes, vertex: HashVertex, color='white', linewidth=0.5):
+        if vertex.previous is not None:
+            ax.plot([vertex.previous.x, vertex.x], [vertex.previous.y, vertex.y], color=color, linewidth=linewidth)
 
     @staticmethod
     def draw_lines(ax: Axes, from_vertex: HashVertex, to_vertices: List[HashVertex], color=None, linewidth=0.5):
@@ -604,9 +652,6 @@ class Graph:
         for line in lines:
             xs, ys = line
             ax.plot(xs, ys, color=color if color is not None else 'white', linewidth=linewidth)
-            #fig: Figure = ax.get_figure()
-            # plt.draw()  # re-draw the figure
-            # plt.pause(0.000000000001)
 
 
 class CrimeMap:
@@ -715,66 +760,133 @@ class CrimeMap:
             pad=10,
             fontdict=dict(fontsize=8))
 
-        # def onclick(event):
-        #     print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
-        #           ('double' if event.dblclick else 'single', event.button,
-        #            event.x, event.y, event.xdata, event.ydata))
-        #
-        # cid = ax.get_figure().canvas.mpl_connect('button_press_event', onclick)
-
-        plt.draw()
-
         return ax
 
-def main():
 
+class Main:
+    fig: Figure
+    fig_controls: Figure
+    ax: Axes
+    ax_controls: Axes
+    crime_map: CrimeMap
+    start: Optional[Point]
+    goal: Optional[Point]
+    _path_handles: List[Line2D]
+    _should_set_start_next: bool
+    _delta: float
+    _threshold_percent: float
 
-    # -73.554, 45.526
-    # -73.554, 45.504
-    # -73.554, 45.502
-    loop = True
-    delta_default = 0.002
-    threshold_percent_default = 50
-    x_start_default = -73.589
-    y_start_default = 45.491
-    x_end_default = -73.554
-    y_end_default = 45.502
-    while loop:
-        ax = plt.axes()
-        delta = input(f'delta: ({delta_default}) ')
-        delta = delta if not delta == '' else delta_default
-        threshold_percent = input(f'threshold%: ({threshold_percent_default}) ')
-        threshold_percent = threshold_percent if not threshold_percent == '' else threshold_percent_default
-        start_coords = input(f'start: ({x_start_default}, {y_start_default}) ')
-        [start_x, start_y] = start_coords.split(', ') if not start_coords == '' else ['', '']
-        end_coords = input(f'end: ({x_end_default}, {y_end_default}) ')
-        [end_x, end_y] = end_coords.split(', ') if not end_coords == '' else ['', '']
+    def __init__(self):
+        self.root = tkinter.Tk()
+        self.start = None
+        self.goal = None
+        self._should_set_start_next = True
+        self._delta = 0.002
+        self._threshold_percent = 50
 
-        plt.ion()
-        start_time = time()
+    def run(self):
+        # plt.ion()
+        # self.fig, (self.ax, self.ax_controls) = plt.subplots(1, 2)
+        self.fig = plt.figure(figsize=(5, 3))
+        # self.fig_controls = plt.figure(figsize=(2, 2))
+        self.ax = plt.subplot2grid((1, 4), (0, 0), colspan=3, fig=self.fig)
+        # self.ax_controls = self.fig_controls.gca()  # plt.subplot2grid((1, 3), (0, 2), fig=self.fig)
 
-        crime_map: CrimeMap = CrimeMap(shape_file="./Shape/crime_dt.shp", delta=float(delta),
-                                       threshold_percent=float(threshold_percent))
-        crime_map.plot_hist2d()
-        ax: Axes = crime_map.plot(ax)
+        self.canvas = FigureCanvasTkAgg(self.fig, self.root)
+        self._draw_map()
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.pack(side=tkinter.TOP, fill=tkinter.BOTH, expand=1)
 
-        # crime_map.graph.search(ax=ax, start=Point(-73.589, 45.491), end=Point(-73.589, 45.492))
-        crime_map.graph.search(ax=ax,
-                               start=Point(float(start_x) if not start_x == '' else x_start_default,
-                                           float(start_y) if not start_y == '' else y_start_default),
-                               end=Point(float(end_x) if not end_x == '' else x_end_default,
-                                         float(end_y) if not end_y == '' else y_end_default))
-        # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.555, 45.514))
-        # crime_map.graph.search(ax=ax, start=Point(-73.588, 45.494), end=Point(-73.562, 45.506))
+        self.canvas.mpl_connect('button_press_event', self._onclick)
 
-        end_time = time()
-        exec_time = end_time - start_time
-        print('exec_time: ' + str(exec_time))
-        plt.draw()  # re-draw the figure
-        plt.pause(0.000000000001)
-        plt.ioff()
-        plt.show()
+        self.sv1 = tkinter.StringVar(value='0.002')
+        self.sv2 = tkinter.StringVar(value='50')
+
+        l1 = tkinter.Label(self.root, text='Width:', width=8)
+        l1.pack(side=tkinter.LEFT)
+        e1 = tkinter.Entry(self.root, textvariable=self.sv1, width=10)
+        e1.pack(side=tkinter.LEFT)
+        self.e1 = e1
+
+        l2 = tkinter.Label(self.root, text='Threshold%:', width=12)
+        l2.pack(side=tkinter.LEFT, padx=10)
+        e2 = tkinter.Entry(self.root, textvariable=self.sv2, width=5)
+        e2.pack(side=tkinter.LEFT)
+        self.e2 = e2
+
+        e1.bind('<Return>', self._onsubmit_delta)
+        e2.bind('<Return>', self._onsubmit_threshold_percent)
+
+        self.root.mainloop()
+
+    def _draw_map(self):
+        self.crime_map = CrimeMap(shape_file="./Shape/crime_dt.shp",
+                                  delta=self._delta,
+                                  threshold_percent=self._threshold_percent)
+        self.crime_map.plot(self.ax)
+        # self.canvas.draw_idle()
+        self.fig.canvas.draw_idle()
+
+    def _draw_marker(self, point: Point, is_start: bool):
+        self.ax.plot([point.x], [point.y],
+                     marker='o' if is_start else '*',
+                     color='green' if is_start else 'yellow', zorder=10)
+        self.fig.canvas.draw_idle()
+
+    def _onclick(self, event):
+        x, y = event.xdata, event.ydata
+
+        if x is not None and y is not None and event.inaxes in [self.ax]:
+            if self._should_set_start_next:
+                self.ax.lines.clear()
+                self.start = self.crime_map.graph.closest_point(Point(x, y))
+                self._should_set_start_next = False
+                self._draw_marker(self.start, True)
+            else:
+                self.goal = self.crime_map.graph.closest_point(Point(x, y))
+                self._draw_marker(self.goal, False)
+
+                self._should_set_start_next = True
+                cost_path = self.crime_map.graph.search(ax=self.ax, start=self.start, end=self.goal)
+                self.ax.set_title(
+                    self.ax.get_title() + ', f=' + ('{:.2f}'.format(cost_path) if not cost_path == float('Inf') else '∞'),
+                    fontdict=dict(fontsize=self.ax.title.get_fontsize()))
+                self.fig.canvas.draw_idle()
+
+    def _onsubmit_delta(self, event):
+        print('delta')
+        self._delta = float(self.sv1.get())
+        self.ax.clear()
+        self._draw_map()
+
+    def _onsubmit_threshold_percent(self, event):
+        print('threshold')
+        self._threshold_percent = float(self.sv2.get())
+        self.ax.clear()
+        self._draw_map()
+
+    def _ontextchange(self, event):
+        self.tb_delta.text_disp.set_fontsize(6)
+        self.tb_threshold.text_disp.set_fontsize(6)
+
+    def _init_text_boxes(self):
+        matplotlib.rcParams.update({'font.size': 6})
+
+        ax_delta = self.fig.add_axes([0.8, 0.5, 0.1, 0.05])
+        self.tb_delta = TextBox(ax_delta, 'Width', initial=str(self._delta))
+        self.tb_delta.on_submit(self._onsubmit_delta)
+
+        ax_threshold = self.fig.add_axes([0.8, 0.4, 0.1, 0.05])
+        self.tb_threshold = TextBox(ax_threshold, 'Threshold%', initial=str(self._threshold_percent))
+        self.tb_threshold.on_submit(self._onsubmit_threshold_percent)
+
+        # self.tb_delta.label.set_fontsize(6)
+        # self.tb_delta.text_disp.set_fontsize(6)
+        # # self.tb_delta.connect_event('key_press_event', self._ontextchange)
+        # self.tb_threshold.label.set_fontsize(6)
+        # self.tb_threshold.text_disp.set_fontsize(6)
+        # self.tb_threshold.connect_event('key_press_event', self._ontextchange)
 
 
 if __name__ == '__main__':
-    main()
+    Main().run()
