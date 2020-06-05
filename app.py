@@ -475,12 +475,6 @@ class Graph:
 
         return cells, vertices
 
-    def closest_indices(self, point: Union[Point, HashVertex]) -> Tuple[int, int]:
-        xi = min(int(np.round(max(point.x - self.x_min, 0) / self.delta)), self.nx)
-        yi = min(int(np.round(max(point.y - self.y_min, 0) / self.delta)), self.ny)
-
-        return xi, yi
-
     def closest_vertex(self, point: Point) -> HashVertex:
         closest_distance = float('inf')
         closest_vertex: Optional[HashVertex] = None
